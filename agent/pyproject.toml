@@ -1,0 +1,28 @@
+[project]
+name = "mini-kulu-agent"
+version = "0.1.0"
+description = "LiveKit voice agent: STT -> LLM -> TTS with per-stage latency metrics"
+requires-python = ">=3.12"
+dependencies = [
+    "livekit-agents~=1.8.6",
+    "livekit-plugins-ai-coustics~=0.3.4",
+    "numpy>=1.26",
+    "python-dotenv~=1.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest~=8.4",
+    "pytest-asyncio~=1.2",
+    "ruff~=0.14",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
