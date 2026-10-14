@@ -28,3 +28,6 @@ node_modules/
 
 # Local caches (rendered test prompts, etc.)
 .cache/
+
+# Local agent context (points to private notes outside the repo)
+CLAUDE.local.md
