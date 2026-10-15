@@ -8,16 +8,19 @@ import logging
 import os
 
 from dotenv import load_dotenv
-from livekit import agents
+from livekit import agents, rtc
 from livekit.agents import Agent, AgentServer, AgentSession, TurnHandlingOptions, inference, room_io
 from livekit.plugins import ai_coustics
+
+from rejoin import RejoinGrace
+from tokens import AGENT_NAME  # explicit dispatch: only join rooms that ask for this name
 
 load_dotenv(".env.local")
 
 logger = logging.getLogger("mini-kulu-agent")
 
-# Explicit dispatch: the agent only joins rooms that ask for it by this name.
-AGENT_NAME = "mini-kulu"
+# How long the agent waits for the user to come back (e.g. a browser refresh) before ending.
+REJOIN_GRACE_S = float(os.getenv("AGENT_REJOIN_GRACE_S", "30"))
 
 INSTRUCTIONS = """You are Kulu, a helpful voice assistant that joins live calls.
 Keep answers short and conversational: one to three sentences.
@@ -51,10 +54,28 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         ),
     )
 
+    grace = RejoinGrace(REJOIN_GRACE_S, lambda: ctx.shutdown("user did not rejoin"))
+
+    def is_user(p: rtc.RemoteParticipant) -> bool:
+        return p.kind != rtc.ParticipantKind.PARTICIPANT_KIND_AGENT
+
+    @ctx.room.on("participant_disconnected")
+    def _on_left(p: rtc.RemoteParticipant) -> None:
+        if is_user(p) and not any(is_user(o) for o in ctx.room.remote_participants.values()):
+            grace.user_left()
+
+    @ctx.room.on("participant_connected")
+    def _on_joined(p: rtc.RemoteParticipant) -> None:
+        if is_user(p):
+            grace.user_joined()
+
     await session.start(
         room=ctx.room,
         agent=Assistant(),
         room_options=room_io.RoomOptions(
+            # We decide when to end (RejoinGrace), so a refresh keeps the same session.
+            # The returning user must use the same identity: room_io re-links by identity.
+            close_on_disconnect=False,
             audio_input=room_io.AudioInputOptions(
                 noise_cancellation=ai_coustics.audio_enhancement(
                     model=ai_coustics.EnhancerModel.QUAIL_VF_S
