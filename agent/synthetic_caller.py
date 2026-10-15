@@ -12,6 +12,7 @@ Prompts are rendered with macOS `say` and cached under .cache/prompts/.
 
 import argparse
 import asyncio
+import gc
 import hashlib
 import json
 import logging
@@ -61,6 +62,13 @@ class TurnResult:
     reply: str  # what the agent said
     latency_ms: float | None  # end of caller speech -> first agent audio
     error: str | None = None
+
+
+def is_audible(samples: np.ndarray, threshold: float = SPEECH_RMS) -> bool:
+    """True if an int16 frame is loud enough to be speech, not silence or comfort noise."""
+    if samples.size == 0:
+        return False
+    return float(np.sqrt(np.mean(samples.astype(np.float64) ** 2))) > threshold
 
 
 def render_prompt(text: str, voice: str) -> np.ndarray:
@@ -131,14 +139,15 @@ class Caller:
     # -- incoming audio: timestamp the first audible frame after we stop talking --
     async def listen(self, track: rtc.Track) -> None:
         stream = rtc.AudioStream(track, sample_rate=SAMPLE_RATE, num_channels=1)
-        async for ev in stream:
-            if not self.awaiting_reply:
-                continue
-            samples = np.frombuffer(ev.frame.data, dtype=np.int16)
-            rms = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
-            if rms > SPEECH_RMS:
-                self.first_audio_at = time.perf_counter()
-                self.awaiting_reply = False
+        try:
+            async for ev in stream:
+                if not self.awaiting_reply:
+                    continue
+                if is_audible(np.frombuffer(ev.frame.data, dtype=np.int16)):
+                    self.first_audio_at = time.perf_counter()
+                    self.awaiting_reply = False
+        finally:
+            await stream.aclose()
 
     async def on_transcription(self, reader: rtc.TextStreamReader) -> None:
         text = (await reader.read_all()).strip()
@@ -249,9 +258,13 @@ async def run(turns: int, voice: str, step_timeout: float, out: Path | None) -> 
                 flush=True,
             )
     finally:
-        await room.disconnect()
-        for task in tasks:
+        # Stop our tasks before disconnecting so no native (FFI) handles outlive the room.
+        pending = list(tasks)
+        for task in pending:
             task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        await room.disconnect()
+        await source.aclose()
 
     latencies = [r.latency_ms for r in results if r.latency_ms is not None]
     if latencies:
@@ -271,8 +284,15 @@ def main() -> None:
     parser.add_argument("--out", type=Path, help="append per-turn results as JSON lines")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
+    # Third-party loggers stay at WARNING: the SDK logs every agent-session byte stream
+    # it ignores at INFO, which buries the per-turn output.
+    logging.basicConfig(level=logging.WARNING)
+    logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
     asyncio.run(run(args.turns, args.voice, args.timeout, args.out))
+    # The room and its event-handler closures form reference cycles. Collect them now,
+    # while the native SDK is still loaded; at interpreter exit its atexit hook tears the
+    # library down first and every leftover handle then fails to drop.
+    gc.collect()
 
 
 if __name__ == "__main__":
