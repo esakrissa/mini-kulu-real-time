@@ -1,6 +1,9 @@
-import numpy as np
+import wave
 
-from synthetic_caller import SAMPLE_RATE, SAMPLES_PER_FRAME, SPEECH_RMS, is_audible
+import numpy as np
+import pytest
+
+from synthetic_caller import SAMPLE_RATE, SAMPLES_PER_FRAME, SPEECH_RMS, is_audible, load_wav
 
 
 def tone(amplitude: float) -> np.ndarray:
@@ -30,3 +33,32 @@ def test_empty_frame_is_not_audible():
 def test_large_samples_do_not_overflow():
     # Squaring int16 in int16 would wrap around; full-scale must still read as loud.
     assert is_audible(np.full(SAMPLES_PER_FRAME, 32767, dtype=np.int16))
+
+
+def write_wav(path, samples: np.ndarray, rate: int = SAMPLE_RATE, channels: int = 1) -> None:
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(samples.tobytes())
+
+
+def test_load_wav_returns_samples(tmp_path):
+    path = tmp_path / "ok.wav"
+    write_wav(path, tone(3 * SPEECH_RMS))
+    assert len(load_wav(path)) == SAMPLES_PER_FRAME
+
+
+def test_load_wav_rejects_empty_audio(tmp_path):
+    # What a wedged `say` left behind: a header with zero frames.
+    path = tmp_path / "empty.wav"
+    write_wav(path, np.array([], dtype=np.int16))
+    with pytest.raises(ValueError, match="no audio"):
+        load_wav(path)
+
+
+def test_load_wav_rejects_wrong_format(tmp_path):
+    path = tmp_path / "16k.wav"
+    write_wav(path, tone(3 * SPEECH_RMS), rate=16000)
+    with pytest.raises(ValueError, match="mono"):
+        load_wav(path)

@@ -8,6 +8,7 @@ includes network, STT endpointing, LLM, TTS and jitter buffers.
 Prompts are rendered with macOS `say` and cached under .cache/prompts/.
 
     uv run python synthetic_caller.py --turns 10
+    uv run python synthetic_caller.py --scenario rejoin   # leave + rejoin mid-conversation
 """
 
 import argparse
@@ -25,19 +26,20 @@ from pathlib import Path
 
 import numpy as np
 from dotenv import load_dotenv
-from livekit import api, rtc
+from livekit import rtc
 
 from latency_stats import summarize
+from tokens import make_token
 
 load_dotenv(".env.local")
 logger = logging.getLogger("synthetic-caller")
 
-AGENT_NAME = "mini-kulu"
 SAMPLE_RATE = 48000
 FRAME_MS = 10
 SAMPLES_PER_FRAME = SAMPLE_RATE * FRAME_MS // 1000
 # int16 RMS above which a received frame counts as speech rather than silence/comfort noise.
 SPEECH_RMS = 500
+RENDER_TIMEOUT_S = 60
 CACHE_DIR = Path(__file__).parent / ".cache" / "prompts"
 
 PROMPTS = [
@@ -52,6 +54,12 @@ PROMPTS = [
     "What is two plus two?",
     "Say goodbye in Indonesian.",
 ]
+
+
+# Rejoin scenario: ask the agent to remember something, leave, rejoin, ask for it back.
+REJOIN_REMEMBER = "Please remember the number forty two."
+REJOIN_RECALL = "What number did I ask you to remember?"
+REJOIN_EXPECT = ("42", "forty two", "forty-two")
 
 
 @dataclass
@@ -71,39 +79,50 @@ def is_audible(samples: np.ndarray, threshold: float = SPEECH_RMS) -> bool:
     return float(np.sqrt(np.mean(samples.astype(np.float64) ** 2))) > threshold
 
 
+def load_wav(path: Path) -> np.ndarray:
+    """Load a prompt as 48 kHz mono int16, rejecting files that can't be spoken."""
+    with wave.open(str(path), "rb") as wf:
+        if wf.getframerate() != SAMPLE_RATE or wf.getnchannels() != 1:
+            raise ValueError(f"{path.name}: expected {SAMPLE_RATE} Hz mono")
+        samples = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
+    if samples.size == 0:
+        raise ValueError(f"{path.name}: no audio frames")
+    return samples
+
+
 def render_prompt(text: str, voice: str) -> np.ndarray:
     """Render text to 48 kHz mono int16 with macOS `say`, cached by content hash."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha1(f"{voice}:{text}".encode()).hexdigest()[:16]
     path = CACHE_DIR / f"{key}.wav"
-    if not path.exists():
+    if path.exists():
+        return load_wav(path)
+    # Render to a temp file and only move it into the cache once it's valid: a wedged or
+    # killed `say` once left a 1.6 GB file with an empty header that the cache then trusted.
+    tmp = path.with_suffix(".partial.wav")
+    try:
         subprocess.run(
-            ["say", "-v", voice, "-o", str(path), f"--data-format=LEI16@{SAMPLE_RATE}", text],
+            ["say", "-v", voice, "-o", str(tmp), f"--data-format=LEI16@{SAMPLE_RATE}", text],
             check=True,
+            # `say` can wedge when the speech service is overloaded; fail instead of hanging.
+            timeout=RENDER_TIMEOUT_S,
         )
-    with wave.open(str(path), "rb") as wf:
-        assert wf.getframerate() == SAMPLE_RATE and wf.getnchannels() == 1
-        return np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
-
-
-def make_token(room_name: str, identity: str) -> str:
-    # Embedding a RoomAgentDispatch in the token makes LiveKit dispatch the agent
-    # as soon as this participant joins.
-    return (
-        api.AccessToken(os.environ["LIVEKIT_API_KEY"], os.environ["LIVEKIT_API_SECRET"])
-        .with_identity(identity)
-        .with_grants(api.VideoGrants(room_join=True, room=room_name))
-        .with_room_config(
-            api.RoomConfiguration(agents=[api.RoomAgentDispatch(agent_name=AGENT_NAME)])
-        )
-        .to_jwt()
-    )
+        samples = load_wav(tmp)
+        tmp.replace(path)
+        return samples
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 class Caller:
-    def __init__(self, room: rtc.Room, source: rtc.AudioSource) -> None:
-        self.room = room
-        self.source = source
+    """One caller identity that can join, leave and rejoin the same room."""
+
+    def __init__(self, room_name: str, identity: str = "synthetic-caller") -> None:
+        self.room_name = room_name
+        self.identity = identity
+        self.room: rtc.Room | None = None
+        self.source: rtc.AudioSource | None = None
+        self.tasks: set[asyncio.Task] = set()
         self.agent_state = "unknown"
         self.state_changed = asyncio.Event()
         self.pending_speech: np.ndarray | None = None
@@ -115,8 +134,65 @@ class Caller:
         self.agent_transcripts: list[str] = []
         self.local_track_sid: str | None = None
 
+    def _spawn(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+
+    async def join(self) -> None:
+        room = rtc.Room()
+        self.room = room
+        self.agent_state = "unknown"
+
+        @room.on("track_subscribed")
+        def _on_track(track: rtc.Track, _pub, participant: rtc.RemoteParticipant) -> None:
+            if track.kind == rtc.TrackKind.KIND_AUDIO and participant.kind == (
+                rtc.ParticipantKind.PARTICIPANT_KIND_AGENT
+            ):
+                self._spawn(self.listen(track))
+
+        @room.on("participant_attributes_changed")
+        def _on_attrs(changed: dict[str, str], participant: rtc.Participant) -> None:
+            if "lk.agent.state" in changed:
+                self.set_agent_state(changed["lk.agent.state"])
+
+        @room.on("participant_connected")
+        def _on_join(participant: rtc.RemoteParticipant) -> None:
+            if "lk.agent.state" in participant.attributes:
+                self.set_agent_state(participant.attributes["lk.agent.state"])
+
+        room.register_text_stream_handler(
+            "lk.transcription", lambda reader, _identity: self._spawn(self.on_transcription(reader))
+        )
+
+        logger.info("joining room %s as %s", self.room_name, self.identity)
+        await room.connect(os.environ["LIVEKIT_URL"], make_token(self.room_name, self.identity))
+        # On a rejoin the agent is already in the room, so no participant_connected fires.
+        for participant in room.remote_participants.values():
+            _on_join(participant)
+
+        self.source = rtc.AudioSource(SAMPLE_RATE, 1, queue_size_ms=100)
+        pub = await room.local_participant.publish_track(
+            rtc.LocalAudioTrack.create_audio_track("mic", self.source),
+            rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),
+        )
+        self.local_track_sid = pub.sid
+        self._spawn(self.mic_loop(self.source))
+
+    async def leave(self) -> None:
+        # Stop our tasks before disconnecting so no native (FFI) handles outlive the room.
+        pending = list(self.tasks)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        if self.room is not None:
+            await self.room.disconnect()
+        if self.source is not None:
+            await self.source.aclose()
+        self.room = self.source = None
+
     # -- outgoing audio: a continuous "microphone" of silence, with speech spliced in --
-    async def mic_loop(self) -> None:
+    async def mic_loop(self, source: rtc.AudioSource) -> None:
         silence = np.zeros(SAMPLES_PER_FRAME, dtype=np.int16)
         while True:
             speech, self.pending_speech = self.pending_speech, None
@@ -125,12 +201,12 @@ class Caller:
                     chunk = speech[i : i + SAMPLES_PER_FRAME]
                     if len(chunk) < SAMPLES_PER_FRAME:
                         chunk = np.pad(chunk, (0, SAMPLES_PER_FRAME - len(chunk)))
-                    await self.source.capture_frame(self._frame(chunk))
+                    await source.capture_frame(self._frame(chunk))
                 # Frames still queued in the source haven't been sent yet.
-                self.speech_end_at = time.perf_counter() + self.source.queued_duration
+                self.speech_end_at = time.perf_counter() + source.queued_duration
                 self.awaiting_reply = True
                 self.speech_done.set()
-            await self.source.capture_frame(self._frame(silence))
+            await source.capture_frame(self._frame(silence))
 
     @staticmethod
     def _frame(samples: np.ndarray) -> rtc.AudioFrame:
@@ -199,72 +275,47 @@ class Caller:
         )
 
 
+def print_result(result: TurnResult) -> None:
+    latency = result.latency_ms if result.latency_ms is not None else "-"
+    print(
+        f"[{result.turn:>2}] {latency:>7} ms  heard={result.heard!r}\n      reply={result.reply!r}"
+        + (f"  ERROR={result.error}" if result.error else ""),
+        flush=True,
+    )
+
+
+def render_all(prompts: list[str], voice: str) -> dict[str, np.ndarray]:
+    """Render every prompt before joining: `say` is slow and blocking, so it must never run
+    while we're in a room (it would stall the event loop and the WebRTC connection)."""
+    return {p: render_prompt(p, voice) for p in dict.fromkeys(prompts)}
+
+
+async def run_turns(
+    caller: Caller,
+    prompts: list[str],
+    audio: dict[str, np.ndarray],
+    step_timeout: float,
+    start: int = 1,
+) -> list[TurnResult]:
+    results = []
+    for n, prompt in enumerate(prompts, start=start):
+        result = await caller.turn(n, prompt, audio[prompt], step_timeout)
+        print_result(result)
+        results.append(result)
+    return results
+
+
 async def run(turns: int, voice: str, step_timeout: float, out: Path | None) -> list[TurnResult]:
+    caller = Caller(f"caller-{int(time.time())}")
     prompts = [PROMPTS[i % len(PROMPTS)] for i in range(turns)]
-    audio = [render_prompt(p, voice) for p in prompts]
-
-    room_name = f"caller-{int(time.time())}"
-    room = rtc.Room()
-    source = rtc.AudioSource(SAMPLE_RATE, 1, queue_size_ms=100)
-    caller = Caller(room, source)
-    tasks: set[asyncio.Task] = set()
-
-    def spawn(coro) -> None:
-        task = asyncio.create_task(coro)
-        tasks.add(task)
-        task.add_done_callback(tasks.discard)
-
-    @room.on("track_subscribed")
-    def _on_track(track: rtc.Track, _pub, participant: rtc.RemoteParticipant) -> None:
-        if track.kind == rtc.TrackKind.KIND_AUDIO and participant.kind == (
-            rtc.ParticipantKind.PARTICIPANT_KIND_AGENT
-        ):
-            spawn(caller.listen(track))
-
-    @room.on("participant_attributes_changed")
-    def _on_attrs(changed: dict[str, str], participant: rtc.Participant) -> None:
-        if "lk.agent.state" in changed:
-            caller.set_agent_state(changed["lk.agent.state"])
-
-    @room.on("participant_connected")
-    def _on_join(participant: rtc.RemoteParticipant) -> None:
-        if "lk.agent.state" in participant.attributes:
-            caller.set_agent_state(participant.attributes["lk.agent.state"])
-
-    room.register_text_stream_handler(
-        "lk.transcription", lambda reader, _identity: spawn(caller.on_transcription(reader))
-    )
-
-    logger.info("joining room %s", room_name)
-    await room.connect(os.environ["LIVEKIT_URL"], make_token(room_name, "synthetic-caller"))
-    pub = await room.local_participant.publish_track(
-        rtc.LocalAudioTrack.create_audio_track("mic", source),
-        rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),
-    )
-    caller.local_track_sid = pub.sid
-    spawn(caller.mic_loop())
-
-    results: list[TurnResult] = []
+    audio = render_all(prompts, voice)
+    await caller.join()
     try:
-        # The agent greets first; wait for it to finish before the first prompt.
+        # The agent greets first; wait for it to start before the first prompt.
         await caller.wait_for_state("speaking", step_timeout)
-        for n, (prompt, samples) in enumerate(zip(prompts, audio, strict=True), start=1):
-            result = await caller.turn(n, prompt, samples, step_timeout)
-            results.append(result)
-            print(
-                f"[{n:>2}] {result.latency_ms if result.latency_ms is not None else '-':>7} ms"
-                f"  heard={result.heard!r}\n      reply={result.reply!r}"
-                + (f"  ERROR={result.error}" if result.error else ""),
-                flush=True,
-            )
+        results = await run_turns(caller, prompts, audio, step_timeout)
     finally:
-        # Stop our tasks before disconnecting so no native (FFI) handles outlive the room.
-        pending = list(tasks)
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
-        await room.disconnect()
-        await source.aclose()
+        await caller.leave()
 
     latencies = [r.latency_ms for r in results if r.latency_ms is not None]
     if latencies:
@@ -272,15 +323,37 @@ async def run(turns: int, voice: str, step_timeout: float, out: Path | None) -> 
     if out:
         with out.open("a") as f:
             for r in results:
-                f.write(json.dumps({"room": room_name, **asdict(r)}) + "\n")
+                f.write(json.dumps({"room": caller.room_name, **asdict(r)}) + "\n")
     return results
+
+
+async def run_rejoin(voice: str, step_timeout: float, away_s: float) -> bool:
+    """Leave mid-conversation, rejoin as the same identity, and check the agent remembers."""
+    caller = Caller(f"caller-rejoin-{int(time.time())}")
+    audio = render_all([REJOIN_REMEMBER, REJOIN_RECALL], voice)
+    await caller.join()
+    try:
+        await caller.wait_for_state("speaking", step_timeout)
+        await run_turns(caller, [REJOIN_REMEMBER], audio, step_timeout)
+        await caller.leave()
+        print(f"     left the room; rejoining in {away_s:.0f} s (like a browser refresh)")
+        await asyncio.sleep(away_s)
+        await caller.join()
+        [result] = await run_turns(caller, [REJOIN_RECALL], audio, step_timeout, start=2)
+    finally:
+        await caller.leave()
+    ok = result.error is None and any(w in result.reply.lower() for w in REJOIN_EXPECT)
+    print("\nrejoin:", "PASS (agent kept the conversation)" if ok else "FAIL")
+    return ok
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--scenario", choices=["turns", "rejoin"], default="turns")
     parser.add_argument("--turns", type=int, default=5)
     parser.add_argument("--voice", default="Samantha", help="macOS `say` voice")
     parser.add_argument("--timeout", type=float, default=30.0, help="per-step timeout (s)")
+    parser.add_argument("--away", type=float, default=3.0, help="rejoin scenario: seconds away")
     parser.add_argument("--out", type=Path, help="append per-turn results as JSON lines")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
@@ -288,11 +361,18 @@ def main() -> None:
     # it ignores at INFO, which buries the per-turn output.
     logging.basicConfig(level=logging.WARNING)
     logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
-    asyncio.run(run(args.turns, args.voice, args.timeout, args.out))
+    if args.scenario == "rejoin":
+        ok = asyncio.run(run_rejoin(args.voice, args.timeout, args.away))
+    else:
+        ok = all(
+            r.error is None
+            for r in asyncio.run(run(args.turns, args.voice, args.timeout, args.out))
+        )
     # The room and its event-handler closures form reference cycles. Collect them now,
     # while the native SDK is still loaded; at interpreter exit its atexit hook tears the
     # library down first and every leftover handle then fails to drop.
     gc.collect()
+    raise SystemExit(0 if ok else 1)
 
 
 if __name__ == "__main__":
