@@ -29,6 +29,7 @@ from dotenv import load_dotenv
 from livekit import rtc
 
 from latency_stats import summarize
+from rejoin import HANGUP_RPC
 from tokens import make_token
 
 load_dotenv(".env.local")
@@ -179,6 +180,28 @@ class Caller:
         self.local_track_sid = pub.sid
         self._spawn(self.mic_loop(self.source))
 
+    async def hang_up(self) -> None:
+        """Leave for good: tell the agent first, so it ends now instead of waiting for a rejoin."""
+        agent = self.agent_participant()
+        if agent is not None:
+            try:
+                await self.room.local_participant.perform_rpc(
+                    destination_identity=agent.identity, method=HANGUP_RPC, payload=""
+                )
+            except rtc.RpcError as e:
+                logger.warning("hang-up RPC failed (%s); the agent will time out instead", e)
+        await self.leave()
+
+    def agent_participant(self) -> rtc.RemoteParticipant | None:
+        if self.room is None or not self.room.isconnected():
+            return None
+        agents = (
+            p
+            for p in self.room.remote_participants.values()
+            if p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT
+        )
+        return next(agents, None)
+
     async def leave(self) -> None:
         # Stop our tasks before disconnecting so no native (FFI) handles outlive the room.
         pending = list(self.tasks)
@@ -315,7 +338,7 @@ async def run(turns: int, voice: str, step_timeout: float, out: Path | None) -> 
         await caller.wait_for_state("speaking", step_timeout)
         results = await run_turns(caller, prompts, audio, step_timeout)
     finally:
-        await caller.leave()
+        await caller.hang_up()
 
     latencies = [r.latency_ms for r in results if r.latency_ms is not None]
     if latencies:
@@ -341,7 +364,7 @@ async def run_rejoin(voice: str, step_timeout: float, away_s: float) -> bool:
         await caller.join()
         [result] = await run_turns(caller, [REJOIN_RECALL], audio, step_timeout, start=2)
     finally:
-        await caller.leave()
+        await caller.hang_up()
     ok = result.error is None and any(w in result.reply.lower() for w in REJOIN_EXPECT)
     print("\nrejoin:", "PASS (agent kept the conversation)" if ok else "FAIL")
     return ok

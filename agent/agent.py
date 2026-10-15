@@ -12,7 +12,7 @@ from livekit import agents, rtc
 from livekit.agents import Agent, AgentServer, AgentSession, TurnHandlingOptions, inference, room_io
 from livekit.plugins import ai_coustics
 
-from rejoin import RejoinGrace
+from rejoin import HANGUP_RPC, RejoinGrace
 from tokens import AGENT_NAME  # explicit dispatch: only join rooms that ask for this name
 
 load_dotenv(".env.local")
@@ -54,7 +54,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         ),
     )
 
-    grace = RejoinGrace(REJOIN_GRACE_S, lambda: ctx.shutdown("user did not rejoin"))
+    grace = RejoinGrace(REJOIN_GRACE_S, ctx.shutdown)
 
     def is_user(p: rtc.RemoteParticipant) -> bool:
         return p.kind != rtc.ParticipantKind.PARTICIPANT_KIND_AGENT
@@ -83,6 +83,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             ),
         ),
     )
+
+    # Registered after start(), once the room is connected and local_participant exists.
+    @ctx.room.local_participant.register_rpc_method(HANGUP_RPC)
+    async def _on_hang_up(data: rtc.RpcInvocationData) -> str:
+        grace.user_hung_up()
+        return "ok"
 
     await session.generate_reply(instructions="Greet the user briefly and offer your help.")
 
