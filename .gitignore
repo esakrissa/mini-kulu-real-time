@@ -31,3 +31,5 @@ node_modules/
 
 # Local agent context (points to private notes outside the repo)
 CLAUDE.local.md
+.claude/
+.playwright-mcp/
