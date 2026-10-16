@@ -1,7 +1,7 @@
 """Mini-Kulu voice agent: STT -> LLM -> TTS over LiveKit.
 
-Day 1: the stock LiveKit Agents pipeline, all models served by LiveKit Inference
-(one set of LiveKit credentials, no extra provider keys).
+All models are served by LiveKit Inference (one set of LiveKit credentials, no extra provider
+keys). Each turn's per-stage latency is recorded by turn_metrics and pushed over OTLP.
 """
 
 import logging
@@ -14,6 +14,7 @@ from livekit.plugins import ai_coustics
 
 from rejoin import HANGUP_RPC, RejoinGrace
 from tokens import AGENT_NAME  # explicit dispatch: only join rooms that ask for this name
+from turn_metrics import process_turn_metrics
 
 load_dotenv(".env.local")
 
@@ -62,6 +63,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             turn_detection=inference.TurnDetector(),
         ),
     )
+
+    # Per-stage latency (STT, end of turn, LLM TTFT, TTS TTFB, end to end) for every turn.
+    turn_metrics = process_turn_metrics()
+    session.on("conversation_item_added", turn_metrics.on_conversation_item_added)
+    ctx.add_shutdown_callback(turn_metrics.flush)
 
     grace = RejoinGrace(REJOIN_GRACE_S, ctx.shutdown)
 

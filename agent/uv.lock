@@ -1007,6 +1007,8 @@ dependencies = [
     { name = "livekit-agents" },
     { name = "livekit-plugins-ai-coustics" },
     { name = "numpy" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
     { name = "python-dotenv" },
 ]
 
@@ -1022,6 +1024,8 @@ requires-dist = [
     { name = "livekit-agents", specifier = "~=1.8.6" },
     { name = "livekit-plugins-ai-coustics", specifier = "~=0.3.4" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "opentelemetry-exporter-otlp-proto-http", specifier = "~=1.44" },
+    { name = "opentelemetry-sdk", specifier = "~=1.44" },
     { name = "python-dotenv", specifier = "~=1.1" },
 ]
 
