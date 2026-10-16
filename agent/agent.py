@@ -22,6 +22,15 @@ logger = logging.getLogger("mini-kulu-agent")
 # How long the agent waits for the user to come back (e.g. a browser refresh) before ending.
 REJOIN_GRACE_S = float(os.getenv("AGENT_REJOIN_GRACE_S", "30"))
 
+# ai-coustics noise cancellation: on for real calls. Turn it off (=0) for synthetic test runs:
+# it costs CPU on a slow laptop and counts against the plan's monthly noise-cancellation minutes.
+NOISE_CANCELLATION = os.getenv("AGENT_NOISE_CANCELLATION", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+
 INSTRUCTIONS = """You are Kulu, a helpful voice assistant that joins live calls.
 Keep answers short and conversational: one to three sentences.
 Never use markdown, lists, emojis, or symbols that can't be spoken."""
@@ -77,8 +86,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             # The returning user must use the same identity: room_io re-links by identity.
             close_on_disconnect=False,
             audio_input=room_io.AudioInputOptions(
-                noise_cancellation=ai_coustics.audio_enhancement(
-                    model=ai_coustics.EnhancerModel.QUAIL_VF_S
+                noise_cancellation=(
+                    ai_coustics.audio_enhancement(model=ai_coustics.EnhancerModel.QUAIL_VF_S)
+                    if NOISE_CANCELLATION
+                    else None
                 ),
             ),
         ),
