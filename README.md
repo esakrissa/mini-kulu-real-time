@@ -48,6 +48,16 @@ uv run python synthetic_caller.py --scenario rejoin --away 25       # leave, rej
 uv run pytest -q && uv run ruff check .
 ```
 
+Run the agent with `AGENT_NOISE_CANCELLATION=0` for these test runs: noise cancellation is meant
+for real microphones, costs CPU, and counts against LiveKit's monthly noise-cancellation minutes.
+
+## Latency metrics
+
+The agent records each turn's latency per stage (`stt_final`, `end_of_turn`, `llm_ttft`, `tts_ttfb`,
+`e2e`) in an OpenTelemetry histogram and pushes it over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is
+set (e.g. Grafana Cloud); otherwise it logs one line per message. Metric definition and p50/p95
+queries: [observability/README.md](observability/README.md).
+
 Latency measured on a laptop is not meaningful (local voice-activity detection can't keep up in
 real time there); real numbers come from the cloud deployment.
 
@@ -55,7 +65,7 @@ real time there); real numbers come from the cloud deployment.
 
 - [x] Day 1: LiveKit quickstart agent running locally ([screenshot](docs/day1-console.png))
 - [x] Day 2: own browser client + token endpoint, refresh rejoins the same conversation
-- [ ] Day 3: per-stage timing → metrics
+- [x] Day 3: per-stage turn latency → OpenTelemetry histogram, pushed over OTLP
 - [ ] Day 4: OpenTofu + budget alert
 - [ ] Day 5: CI plan/apply, deployed
 - [ ] Day 6: p50/p95 dashboard, resilience
