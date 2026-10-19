@@ -150,3 +150,18 @@ p50/p95 queries: [observability/README.md](observability/README.md).
 - [x] Day 5: CI (tests, tofu validate, secret scan), keyless plan/apply, deployed
 - [x] Day 6: Grafana p50/p95 dashboard; LLM watchdog + backup model; TTS fallback
 - [ ] Day 7: scale notes, migration plan, video
+
+## Roadmap (next)
+
+- **ElevenLabs mode, switchable.** An env toggle (e.g. `AGENT_TTS_PROVIDER=elevenlabs`) that puts
+  ElevenLabs (`eleven_flash_v2_5` or v4 Turbo, own API key) first in the voice chain, with the
+  LiveKit Inference voices as the fallback; off by default, so the stack keeps working with
+  only LiveKit credentials. Notes: [docs/elevenlabs-integration.md](docs/elevenlabs-integration.md).
+- **A cleaner client UI.** A minimal call screen: one microphone button (mute/unmute, call
+  state), a live voice waveform for the user and the agent (Web Audio analyser on the local and
+  remote tracks), and a modern transcript (speaker labels, timestamps, interim text streaming
+  in, consecutive user segments merged into one bubble). Still a single static page, no build.
+- **Hosted client on Cloud Run, behind a passcode.** The token server and page as a
+  scale-to-zero Cloud Run service in OpenTofu (slim image built in CI, free tier), with a
+  passcode gate on `/api/token` (passcode in Secret Manager, signed session cookie) and a
+  per-IP rate limit, so a public link can't spend the LiveKit inference credit.
