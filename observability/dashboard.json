@@ -21,8 +21,13 @@
         "label": "Prometheus",
         "type": "datasource",
         "query": "prometheus",
-        "current": {},
-        "hide": 0
+        "current": {
+          "selected": true,
+          "text": "default",
+          "value": "default"
+        },
+        "hide": 0,
+        "regex": "/^(?!.*-usage$).*/"
       }
     ]
   },
