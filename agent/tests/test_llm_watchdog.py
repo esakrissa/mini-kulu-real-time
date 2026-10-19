@@ -94,14 +94,12 @@ def test_apology_on_unrecoverable_llm_error_only():
     assert said == [APOLOGY]
 
 
-def test_apology_is_rate_limited():
-    said, now = [], [100.0]
-    apology = Apology(said.append, min_gap_s=10, clock=lambda: now[0])
+def test_apology_on_every_failed_turn():
+    # The greeting and the first answer failing back to back must both be answered.
+    said = []
+    apology = Apology(said.append)
 
     apology.on_error(llm_error())
-    now[0] += 5
-    apology.on_error(llm_error())
-    now[0] += 6
     apology.on_error(llm_error())
 
     assert said == [APOLOGY, APOLOGY]
