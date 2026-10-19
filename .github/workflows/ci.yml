@@ -11,7 +11,7 @@ permissions:
 jobs:
   agent:
     name: Agent tests and lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: agent
@@ -27,7 +27,7 @@ jobs:
 
   tofu:
     name: OpenTofu fmt and validate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: opentofu/setup-opentofu@v2
@@ -44,7 +44,7 @@ jobs:
 
   secrets:
     name: Secret scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
