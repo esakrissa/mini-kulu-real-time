@@ -67,6 +67,12 @@ variable "otlp_headers" {
   default     = ""
   sensitive   = true
   ephemeral   = true
+
+  # An endpoint without credentials would deploy an agent whose every export is rejected.
+  validation {
+    condition     = var.otlp_endpoint == "" || length(var.otlp_headers) > 0
+    error_message = "otlp_endpoint is set but otlp_headers is empty (is TF_VAR_otlp_headers / the OTLP_HEADERS secret set?)."
+  }
 }
 
 variable "secrets_version" {

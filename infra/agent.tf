@@ -36,7 +36,8 @@ resource "google_storage_bucket" "source" {
   public_access_prevention    = "enforced"
   force_destroy               = true # only holds copies of files that live in git
 
-  # Old releases are only needed for a quick rollback.
+  # Each apply deletes the previous release's objects (rollback = apply an older commit);
+  # this only cleans up anything left behind.
   lifecycle_rule {
     condition {
       age = 30

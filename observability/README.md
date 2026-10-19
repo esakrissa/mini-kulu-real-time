@@ -41,6 +41,25 @@ turn latency (user): stt_final=0.612s end_of_turn=2.501s
 turn latency (assistant): llm_ttft=0.952s tts_ttfb=0.624s e2e=3.155s
 ```
 
+## Dashboard
+
+[`dashboard.json`](dashboard.json) (uid `mini-kulu-latency`): end-to-end p50/p95 and turn count
+over the selected range, a p50/p95 table per stage, LLM first-token time by model (a watchdog
+failover shows as a second series, and a stat counts turns on the backup model), and p50/p95
+per stage over time. It has a `datasource` variable, so it works with any Prometheus data source.
+
+Import it in Grafana (Dashboards → New → Import → upload the file), or through the API with a
+service account token that can write dashboards:
+
+```bash
+jq '{dashboard: ., overwrite: true}' observability/dashboard.json |
+  curl -fsS -X POST "$GRAFANA_URL/api/dashboards/db" \
+    -H "Authorization: Bearer $GRAFANA_TOKEN" -H "Content-Type: application/json" -d @-
+```
+
+Grafana Cloud's free tier (10k active series, 14 days of history) is plenty: the histogram is
+5 stages × 1–2 models × 20 buckets, plus `_sum` and `_count`.
+
 ## Queries (PromQL)
 
 p50 / p95 per stage over the dashboard window:
