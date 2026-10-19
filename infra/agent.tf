@@ -16,6 +16,7 @@ locals {
     "pyproject.toml",
     "rejoin.py",
     "tokens.py",
+    "tts_fallback.py",
     "turn_metrics.py",
     "uv.lock",
   ]
