@@ -1,0 +1,87 @@
+#!/bin/bash
+# Rendered by OpenTofu (infra/agent.tf). Runs as root on every boot of the agent VM.
+# Output: `sudo journalctl -u google-startup-scripts` on the VM, or the serial console.
+set -euo pipefail
+
+APP=/opt/mini-kulu
+USER_NAME=minikulu
+META=http://metadata.google.internal/computeMetadata/v1
+
+# e2-micro has 1 GB of RAM; the SDK import plus a job process needs headroom.
+if ! swapon --show=NAME --noheadings | grep -qx /swapfile; then
+  [ -f /swapfile ] || { fallocate -l 2G /swapfile; chmod 600 /swapfile; mkswap /swapfile; }
+  swapon /swapfile
+fi
+
+id -u "$USER_NAME" >/dev/null 2>&1 || useradd --system --home-dir "$APP" --shell /usr/sbin/nologin "$USER_NAME"
+mkdir -p "$APP/agent"
+command -v python3 >/dev/null || { apt-get update -q; apt-get install -yq python3; }
+
+# uv: pinned standalone binary, checksum-checked.
+if ! /usr/local/bin/uv --version 2>/dev/null | grep -qF "uv ${uv_version}"; then
+  tmp=$(mktemp -d)
+  curl -fsSL -o "$tmp/uv.tar.gz" "https://github.com/astral-sh/uv/releases/download/${uv_version}/uv-x86_64-unknown-linux-gnu.tar.gz"
+  echo "${uv_sha256}  $tmp/uv.tar.gz" | sha256sum -c -
+  tar -xzf "$tmp/uv.tar.gz" -C "$tmp"
+  install -m 0755 "$tmp/uv-x86_64-unknown-linux-gnu/uv" /usr/local/bin/uv
+  rm -rf "$tmp"
+fi
+
+TOKEN=$(curl -fsS -H Metadata-Flavor:Google "$META/instance/service-accounts/default/token" |
+  python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')
+
+# This release's source files (uploaded by OpenTofu under a content hash).
+for f in ${files}; do
+  curl -fsS -H "Authorization: Bearer $TOKEN" -o "$APP/agent/$f" \
+    "https://storage.googleapis.com/storage/v1/b/${bucket}/o/${prefix}%2F$f?alt=media"
+done
+
+secret() {
+  curl -fsS -H "Authorization: Bearer $TOKEN" \
+    "https://secretmanager.googleapis.com/v1/projects/${project_id}/secrets/$1/versions/latest:access" |
+    python3 -c 'import base64, json, sys; print(base64.b64decode(json.load(sys.stdin)["payload"]["data"]).decode())'
+}
+
+# The agent loads .env.local from its working directory. Only the service user can read it.
+umask 077
+{
+  echo "LIVEKIT_URL=${livekit_url}"
+  echo "LIVEKIT_API_KEY=$(secret ${secrets["livekit-api-key"]})"
+  echo "LIVEKIT_API_SECRET=$(secret ${secrets["livekit-api-secret"]})"
+%{ if otlp_endpoint != "" ~}
+  echo "OTEL_EXPORTER_OTLP_ENDPOINT=${otlp_endpoint}"
+  echo "OTEL_EXPORTER_OTLP_HEADERS=$(secret ${lookup(secrets, "otlp-headers", "")})"
+%{ endif ~}
+} > "$APP/agent/.env.local"
+umask 022
+chown -R "$USER_NAME:" "$APP"
+
+# Locked dependencies only (uv.lock); uv also fetches the pinned Python version.
+runuser -u "$USER_NAME" -- env HOME="$APP" bash -c "cd $APP/agent && /usr/local/bin/uv sync --frozen --no-dev"
+
+cat > /etc/systemd/system/mini-kulu-agent.service <<EOF
+[Unit]
+Description=Mini-Kulu LiveKit agent worker
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=$USER_NAME
+WorkingDirectory=$APP/agent
+Environment=HOME=$APP
+Environment=PYTHONUNBUFFERED=1
+Environment=AGENT_NOISE_CANCELLATION=${noise_cancellation}
+ExecStart=/usr/local/bin/uv run --frozen --no-dev python agent.py start
+Restart=always
+RestartSec=5
+# On SIGTERM the worker stops taking jobs and lets active calls finish.
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable mini-kulu-agent
+systemctl restart mini-kulu-agent
+echo "mini-kulu agent started (release ${prefix})"

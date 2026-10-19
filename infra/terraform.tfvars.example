@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (gitignored). Secrets don't go here: export them instead,
+# e.g. with `source scripts/tf-env.sh` (reads agent/.env.local):
+#   TF_VAR_livekit_api_key, TF_VAR_livekit_api_secret, TF_VAR_otlp_headers
+project_id  = "my-project"
+livekit_url = "wss://my-project.livekit.cloud"
+
+# otlp_endpoint      = "https://otlp-gateway-<zone>.grafana.net/otlp"
+# noise_cancellation = false
