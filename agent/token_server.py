@@ -8,7 +8,9 @@ Room names and identities are random and unguessable, and a client may send them
 rejoin after a page refresh. There is no user auth: this is a demo. Anyone who can reach the
 endpoint can start a session, so put it behind auth or a rate limit before sharing the URL.
 
-    uv run python token_server.py      # http://localhost:8080
+    uv run python token_server.py      # http://localhost:8080 (HOST/PORT env override)
+
+It listens on localhost only by default; set HOST=0.0.0.0 inside a container.
 """
 
 import logging
@@ -112,7 +114,7 @@ def main() -> None:
     app = create_app(
         os.environ["LIVEKIT_URL"], os.environ["LIVEKIT_API_KEY"], os.environ["LIVEKIT_API_SECRET"]
     )
-    web.run_app(app, port=int(os.getenv("PORT", "8080")))
+    web.run_app(app, host=os.getenv("HOST", "127.0.0.1"), port=int(os.getenv("PORT", "8080")))
 
 
 if __name__ == "__main__":
