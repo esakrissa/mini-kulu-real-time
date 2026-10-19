@@ -1,7 +1,8 @@
 """Mini-Kulu voice agent: STT -> LLM -> TTS over LiveKit.
 
 All models are served by LiveKit Inference (one set of LiveKit credentials, no extra provider
-keys). The LLM runs behind a watchdog with a backup model (llm_watchdog). Each turn's per-stage
+keys). The LLM runs behind a watchdog with a backup model (llm_watchdog), the voice behind a
+fallback to a second vendor (tts_fallback). Each turn's per-stage
 latency is recorded by turn_metrics and pushed over OTLP.
 """
 
@@ -17,6 +18,7 @@ from livekit.plugins import ai_coustics
 from llm_watchdog import BACKUP_MODEL, PRIMARY_MODEL, SESSION_LLM_CONN_OPTIONS, Apology, build_llm
 from rejoin import HANGUP_RPC, RejoinGrace
 from tokens import AGENT_NAME  # explicit dispatch: only join rooms that ask for this name
+from tts_fallback import BACKUP_VOICE, PRIMARY_VOICE, build_tts, session_tts_conn_options
 from turn_metrics import process_turn_metrics
 
 load_dotenv(".env.local")
@@ -34,6 +36,16 @@ LLM_MODELS = [
     m.strip()
     for m in os.getenv("AGENT_LLM_MODELS", f"{PRIMARY_MODEL},{BACKUP_MODEL}").split(",")
     if m.strip()
+]
+
+# TTS fallback: the longest wait for audio before the backup voice takes the sentence. Keep it
+# above LLM_TIMEOUT_S (the TTS also waits on the LLM's next sentence). Voices are model:voice,
+# primary first; a primary that doesn't exist demos the failover.
+TTS_TIMEOUT_S = float(os.getenv("AGENT_TTS_TIMEOUT_S", "5"))
+TTS_VOICES = [
+    v.strip()
+    for v in os.getenv("AGENT_TTS_VOICES", f"{PRIMARY_VOICE},{BACKUP_VOICE}").split(",")
+    if v.strip()
 ]
 
 # ai-coustics noise cancellation: on for real calls. Turn it off (=0) for synthetic test runs:
@@ -68,14 +80,14 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     session = AgentSession(
         stt=inference.STT(model="assemblyai/universal-3-6-pro", language="en"),
         llm=build_llm(LLM_TIMEOUT_S, LLM_MODELS),
-        tts=inference.TTS(
-            model="fishaudio/s2.1-pro",
-            voice="fa4c9eb3dccc4806b382b40d61c6b10a",
-        ),
+        tts=build_tts(TTS_VOICES),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(),
         ),
-        conn_options=SessionConnectOptions(llm_conn_options=SESSION_LLM_CONN_OPTIONS),
+        conn_options=SessionConnectOptions(
+            llm_conn_options=SESSION_LLM_CONN_OPTIONS,
+            tts_conn_options=session_tts_conn_options(TTS_TIMEOUT_S),
+        ),
     )
 
     # If the primary and the backup both fail a turn, say so instead of going silent.
