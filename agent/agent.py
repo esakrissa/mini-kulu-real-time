@@ -14,7 +14,7 @@ from livekit.agents import Agent, AgentServer, AgentSession, TurnHandlingOptions
 from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import ai_coustics
 
-from llm_watchdog import SESSION_LLM_CONN_OPTIONS, Apology, build_llm
+from llm_watchdog import BACKUP_MODEL, PRIMARY_MODEL, SESSION_LLM_CONN_OPTIONS, Apology, build_llm
 from rejoin import HANGUP_RPC, RejoinGrace
 from tokens import AGENT_NAME  # explicit dispatch: only join rooms that ask for this name
 from turn_metrics import process_turn_metrics
@@ -29,6 +29,12 @@ REJOIN_GRACE_S = float(os.getenv("AGENT_REJOIN_GRACE_S", "30"))
 # LLM watchdog: the longest the caller waits for the model's next bytes before the backup
 # model takes the turn. Gemma's time to first token is ~0.2 s at p50 and ~0.9 s at p95.
 LLM_TIMEOUT_S = float(os.getenv("AGENT_LLM_TIMEOUT_S", "3"))
+# Primary first. Overriding it (e.g. a model name that doesn't exist) demos the failover.
+LLM_MODELS = [
+    m.strip()
+    for m in os.getenv("AGENT_LLM_MODELS", f"{PRIMARY_MODEL},{BACKUP_MODEL}").split(",")
+    if m.strip()
+]
 
 # ai-coustics noise cancellation: on for real calls. Turn it off (=0) for synthetic test runs:
 # it costs CPU on a slow laptop and counts against the plan's monthly noise-cancellation minutes.
@@ -61,7 +67,7 @@ server = AgentServer(
 async def entrypoint(ctx: agents.JobContext) -> None:
     session = AgentSession(
         stt=inference.STT(model="assemblyai/universal-3-6-pro", language="en"),
-        llm=build_llm(LLM_TIMEOUT_S),
+        llm=build_llm(LLM_TIMEOUT_S, LLM_MODELS),
         tts=inference.TTS(
             model="fishaudio/s2.1-pro",
             voice="fa4c9eb3dccc4806b382b40d61c6b10a",

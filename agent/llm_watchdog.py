@@ -11,7 +11,6 @@ line, so the caller isn't left in silence wondering whether the call dropped.
 """
 
 import logging
-import time
 from collections.abc import Callable, Sequence
 
 from livekit.agents import APIConnectOptions, ErrorEvent, inference, llm
@@ -47,30 +46,18 @@ def fallback_llm(llms: Sequence[llm.LLM], timeout_s: float) -> llm.FallbackAdapt
 class Apology:
     """Speaks APOLOGY when an LLM turn failed on every model.
 
-    At most once per `min_gap_s`: if the LLM stays down, repeating the line every turn would
-    only make things worse. The session itself closes after a few failed turns in a row.
+    Every failed turn gets one: skipping some (a rate limit) left a caller in silence when the
+    greeting and the first answer failed back to back. The SDK ends the session after a few
+    failed turns in a row (SessionConnectOptions.max_unrecoverable_errors, 3), which bounds it.
     """
 
-    def __init__(
-        self,
-        say: Callable[[str], object],
-        *,
-        min_gap_s: float = 10.0,
-        clock: Callable[[], float] = time.monotonic,
-    ) -> None:
+    def __init__(self, say: Callable[[str], object]) -> None:
         self._say = say
-        self._min_gap_s = min_gap_s
-        self._clock = clock
-        self._last: float | None = None
 
     def on_error(self, ev: ErrorEvent) -> None:
         err = ev.error
         if getattr(err, "type", None) != "llm_error" or getattr(err, "recoverable", True):
             return
-        now = self._clock()
-        if self._last is not None and now - self._last < self._min_gap_s:
-            return
-        self._last = now
         logger.warning("LLM turn failed on every model, apologizing to the caller")
         try:
             self._say(APOLOGY)
