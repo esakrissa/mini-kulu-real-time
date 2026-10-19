@@ -12,6 +12,7 @@ locals {
   agent_files = [
     ".python-version",
     "agent.py",
+    "llm_watchdog.py",
     "pyproject.toml",
     "rejoin.py",
     "tokens.py",
