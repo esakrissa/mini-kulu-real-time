@@ -1,0 +1,80 @@
+# `tofu plan` on pull requests, `tofu apply` on main. Keyless: GitHub's OIDC token is exchanged
+# for short-lived GCP credentials (Workload Identity Federation, set up by infra/bootstrap).
+# A change under agent/ is a deploy too: it uploads a new release and replaces the VM.
+name: Infra
+
+on:
+  pull_request:
+    paths: [infra/**, agent/**, .github/workflows/infra.yml]
+  push:
+    branches: [main]
+    paths: [infra/**, agent/**, .github/workflows/infra.yml]
+  workflow_dispatch:
+
+# Never run two applies (or an apply and a plan) against the same state at once.
+concurrency:
+  group: infra
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # for the OIDC token
+
+env:
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "0"
+  TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+  TF_VAR_livekit_url: ${{ vars.LIVEKIT_URL }}
+  TF_VAR_otlp_endpoint: ${{ vars.OTLP_ENDPOINT }}
+  TF_VAR_secrets_version: ${{ vars.SECRETS_VERSION || '1' }}
+  TF_VAR_livekit_api_key: ${{ secrets.LIVEKIT_API_KEY }}
+  TF_VAR_livekit_api_secret: ${{ secrets.LIVEKIT_API_SECRET }}
+  TF_VAR_otlp_headers: ${{ secrets.OTLP_HEADERS }}
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_PLANNER_SA }} # read-only
+      - uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: 1.13.1
+          tofu_wrapper: false
+      - run: tofu init
+      - run: tofu plan -lock-timeout=5m -no-color -out=tfplan
+      - name: Plan summary
+        run: |
+          {
+            echo '### tofu plan'
+            echo '```'
+            tofu show -no-color tfplan | tail -c 60000
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }} # only trusted on refs/heads/main
+      - uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: 1.13.1
+          tofu_wrapper: false
+      - run: tofu init
+      - run: tofu apply -lock-timeout=5m -auto-approve -no-color
