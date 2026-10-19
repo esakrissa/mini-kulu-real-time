@@ -102,12 +102,12 @@ Repository settings, from `tofu -chdir=infra/bootstrap output`:
 | Variable | `GCP_WORKLOAD_IDENTITY_PROVIDER` | `workload_identity_provider` output |
 | Variable | `GCP_PLANNER_SA` | `planner_service_account` output |
 | Variable | `GCP_DEPLOYER_SA` | `deployer_service_account` output |
-| Variable | `LIVEKIT_URL` | `wss://<project>.livekit.cloud` |
 | Variable | `OTLP_ENDPOINT` | optional |
-| Secret | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | from LiveKit Cloud |
+| Secret | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | from LiveKit Cloud |
 | Secret | `OTLP_HEADERS` | optional |
 
-Also create a `production` environment (Settings → Environments) for the apply job; add
+Until the secrets are set, `tofu plan` stops at variable validation, so a half-configured
+repository can't replace the VM with an empty config. Also create a `production` environment (Settings → Environments) for the apply job; add
 required reviewers there if applies should wait for a click.
 
 ## Tearing down

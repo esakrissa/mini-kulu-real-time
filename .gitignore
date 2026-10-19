@@ -17,6 +17,7 @@ __pycache__/
 *.tfvars
 !*.tfvars.example
 crash.log
+*.tfplan
 
 # Node
 node_modules/

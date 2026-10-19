@@ -20,9 +20,16 @@ variable "machine_type" {
   default     = "e2-micro"
 }
 
+# Not a credential, but it identifies the LiveKit project: kept out of plan output (public CI logs).
 variable "livekit_url" {
   description = "wss://<project>.livekit.cloud"
   type        = string
+  sensitive   = true
+
+  validation {
+    condition     = startswith(var.livekit_url, "wss://")
+    error_message = "livekit_url must be a wss:// URL (is TF_VAR_livekit_url set?)."
+  }
 }
 
 # The API key and secret are never stored in the state: they only reach write-only arguments.
@@ -30,12 +37,22 @@ variable "livekit_api_key" {
   type      = string
   sensitive = true
   ephemeral = true
+
+  validation {
+    condition     = length(var.livekit_api_key) > 0
+    error_message = "livekit_api_key is empty (is TF_VAR_livekit_api_key set?)."
+  }
 }
 
 variable "livekit_api_secret" {
   type      = string
   sensitive = true
   ephemeral = true
+
+  validation {
+    condition     = length(var.livekit_api_secret) > 0
+    error_message = "livekit_api_secret is empty (is TF_VAR_livekit_api_secret set?)."
+  }
 }
 
 variable "otlp_endpoint" {

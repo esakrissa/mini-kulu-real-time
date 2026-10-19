@@ -24,7 +24,7 @@ env:
   TF_IN_AUTOMATION: "1"
   TF_INPUT: "0"
   TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
-  TF_VAR_livekit_url: ${{ vars.LIVEKIT_URL }}
+  TF_VAR_livekit_url: ${{ secrets.LIVEKIT_URL }}
   TF_VAR_otlp_endpoint: ${{ vars.OTLP_ENDPOINT }}
   TF_VAR_secrets_version: ${{ vars.SECRETS_VERSION || '1' }}
   TF_VAR_livekit_api_key: ${{ secrets.LIVEKIT_API_KEY }}
