@@ -199,3 +199,27 @@ p50/p95 queries: [observability/README.md](observability/README.md).
   passcode gate on `/api/token` (passcode in Secret Manager, signed HttpOnly session cookie), per-IP
   rate limits and a daily call cap, and an optional custom domain. Setup:
   [infra/README.md](infra/README.md#hosted-web-client-cloud-run).
+
+Next:
+
+- [ ] **Agent tools: live web search through Exa's MCP server.** Give the agent a
+  `web_search_exa` tool from Exa's hosted MCP server (`https://mcp.exa.ai/mcp`, API key in
+  the `x-api-key` header from Secret Manager), attached with LiveKit's
+  `mcp.MCPToolset(mcp_server=mcp.MCPServerHTTP(..., allowed_tools=["web_search_exa"]))` so the
+  model sees one tool, not Exa's whole surface. Exa 3.0 (19 Oct 2026) serves it: a larger
+  embedding model, Dynamic Highlights (about 95% fewer tokens than full pages, which keeps the
+  LLM's first token fast), and a $4 per 1,000 requests Lite tier next to Auto at $7. For voice:
+  the agent says a short filler ("let me look that up") while the tool runs, the tool call gets
+  its own stage in the latency histogram (`tool_call`), and a search that takes longer than ~3 s
+  is dropped, so the answer comes without it rather than late.
+- [ ] **"Ask about this project": an MCP server that can only see this repository.** Let the
+  agent explain mini-kulu itself (architecture, why an e2-micro, how the failover works) from
+  the code, not from memory. Plan: [GitMCP](https://github.com/idosal/git-mcp)'s per-repo
+  endpoint, `https://gitmcp.io/esakrissa/mini-kulu-real-time`. The repository is fixed by the
+  URL, so the tools (fetch docs, search docs, search code) can't reach any other repo. It's
+  free, needs no token, and reads a `llms.txt` first, so the repo gets a short `llms.txt` that
+  points at the README, `docs/architecture.md` and the key modules. Alternatives considered:
+  the official GitHub MCP server with a fine-grained token limited to this one repository,
+  read-only, `repos` toolset only (tightest access control, but raw file reads cost more tokens
+  and time per turn); DeepWiki's MCP `ask_question` (good answers, but slow for voice, and its
+  tools take any repository name, so it needs a wrapper that pins the name).
