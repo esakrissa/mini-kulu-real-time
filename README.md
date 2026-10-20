@@ -189,10 +189,11 @@ p50/p95 queries: [observability/README.md](observability/README.md).
 
 - [x] **ElevenLabs mode, switchable** (see Resilience): an ElevenLabs voice in front of the
   Inference voices, off by default. Notes: [docs/elevenlabs-integration.md](docs/elevenlabs-integration.md).
-- **A cleaner client UI.** A minimal call screen: one microphone button (mute/unmute, call
-  state), a live voice waveform for the user and the agent (Web Audio analyser on the local and
-  remote tracks), and a modern transcript (speaker labels, timestamps, interim text streaming
-  in, consecutive user segments merged into one bubble). Still a single static page, no build.
+- [x] **A cleaner client UI**: a call card with a phone button (start / hang up) and a mic
+  button (mute), a live waveform from Web Audio analysers on both tracks (green while the agent
+  speaks, a sweep while it thinks), the agent's words streaming in as it says them (live caption
+  + transcript), consecutive user segments merged into one bubble, and the reply latency the
+  page sees on each answer. Still one static page, no build step.
 - **Hosted client on Cloud Run, behind a passcode.** The token server and page as a
   scale-to-zero Cloud Run service in OpenTofu (slim image built in CI, free tier), with a
   passcode gate on `/api/token` (passcode in Secret Manager, signed session cookie) and a
