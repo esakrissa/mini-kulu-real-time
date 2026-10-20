@@ -86,3 +86,33 @@ variable "noise_cancellation" {
   type        = bool
   default     = false
 }
+
+variable "tts_provider" {
+  description = "\"inference\" (LiveKit Inference voices only) or \"elevenlabs\" (an ElevenLabs voice first, Inference as the fallback)."
+  type        = string
+  default     = "inference"
+
+  validation {
+    condition     = contains(["inference", "elevenlabs"], var.tts_provider)
+    error_message = "tts_provider must be \"inference\" or \"elevenlabs\"."
+  }
+}
+
+variable "elevenlabs_api_key" {
+  description = "ElevenLabs API key, only used with tts_provider = \"elevenlabs\"."
+  type        = string
+  default     = ""
+  sensitive   = true
+  ephemeral   = true
+
+  validation {
+    condition     = var.tts_provider != "elevenlabs" || length(var.elevenlabs_api_key) > 0
+    error_message = "tts_provider is \"elevenlabs\" but elevenlabs_api_key is empty (is the ELEVEN_API_KEY secret set?)."
+  }
+}
+
+variable "elevenlabs_voice_id" {
+  description = "ElevenLabs voice ID. Empty: the plugin's default voice."
+  type        = string
+  default     = ""
+}

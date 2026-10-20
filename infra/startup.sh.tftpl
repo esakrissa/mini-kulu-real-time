@@ -52,6 +52,11 @@ umask 077
   echo "OTEL_EXPORTER_OTLP_ENDPOINT=${otlp_endpoint}"
   echo "OTEL_EXPORTER_OTLP_HEADERS=$(secret ${lookup(secrets, "otlp-headers", "")})"
 %{ endif ~}
+  echo "AGENT_TTS_PROVIDER=${tts_provider}"
+%{ if tts_provider == "elevenlabs" ~}
+  echo "ELEVEN_API_KEY=$(secret ${lookup(secrets, "elevenlabs-api-key", "")})"
+  echo "ELEVEN_VOICE_ID=${eleven_voice_id}"
+%{ endif ~}
 } > "$APP/agent/.env.local"
 umask 022
 chown -R "$USER_NAME:" "$APP"

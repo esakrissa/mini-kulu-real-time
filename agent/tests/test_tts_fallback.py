@@ -4,7 +4,15 @@ import time
 import pytest
 from livekit.agents import APIConnectionError, APITimeoutError, tts
 
-from tts_fallback import fallback_tts, parse_voice, session_tts_conn_options
+from tts_fallback import (
+    ELEVENLABS_MODEL,
+    build_tts,
+    elevenlabs_tts,
+    fallback_tts,
+    parse_voice,
+    session_tts_conn_options,
+    use_elevenlabs,
+)
 
 SAMPLE_RATE = 24000
 DEFAULT_CONN = session_tts_conn_options(5)
@@ -95,3 +103,30 @@ async def test_all_voices_failing_ends_after_one_pass():
 
     assert primary.calls <= 2 and backup.calls <= 2  # no replay of the chain
     assert time.monotonic() - started < 1.5
+
+
+def test_elevenlabs_mode_is_off_by_default():
+    assert use_elevenlabs("", "key") is False
+    assert use_elevenlabs("inference", "key") is False
+    assert use_elevenlabs(" ElevenLabs ", "key") is True
+
+
+def test_elevenlabs_mode_without_a_key_stays_on_inference(caplog):
+    assert use_elevenlabs("elevenlabs", "") is False
+    assert "ELEVEN_API_KEY is empty" in caplog.text
+
+
+def test_unknown_tts_provider_fails_fast():
+    with pytest.raises(ValueError, match="AGENT_TTS_PROVIDER"):
+        use_elevenlabs("openai", "key")
+
+
+def test_elevenlabs_leads_the_chain_with_inference_behind():
+    eleven = elevenlabs_tts("test-key")
+    assert eleven.model == ELEVENLABS_MODEL
+    chain = build_tts(first=[eleven])
+    assert [t.model for t in chain._tts_instances] == [
+        ELEVENLABS_MODEL,
+        "fishaudio/s2.1-pro",
+        "cartesia/sonic-3",
+    ]

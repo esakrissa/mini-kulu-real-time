@@ -108,6 +108,8 @@ resource "google_compute_instance" "agent" {
     livekit_url        = var.livekit_url
     otlp_endpoint      = var.otlp_endpoint
     noise_cancellation = var.noise_cancellation ? "1" : "0"
+    tts_provider       = var.tts_provider
+    eleven_voice_id    = var.elevenlabs_voice_id
     secrets            = { for name, s in google_secret_manager_secret.this : name => s.secret_id }
   })
 
