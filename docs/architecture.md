@@ -4,10 +4,8 @@
 
 ```mermaid
 flowchart LR
-    subgraph client["Your machine"]
-        browser["Browser<br/>web/ (livekit-client)"]
-        tokens["Token server<br/>agent/token_server.py<br/>signs room tokens"]
-    end
+    browser["Browser<br/>web/ (livekit-client)<br/>mini-kulu.esakrissa.com"]
+    dns["Cloudflare DNS<br/>CNAME → Google<br/>(DNS only)"]
 
     subgraph livekit["LiveKit Cloud"]
         sfu["Media server (SFU)<br/>rooms, WebRTC"]
@@ -19,22 +17,30 @@ flowchart LR
         end
     end
 
+    eleven["ElevenLabs TTS<br/>(optional, own key)"]
+
     subgraph gcp["GCP project (OpenTofu, free tier)"]
+        run["Cloud Run: mini-kulu-client<br/>token server + page<br/>passcode, rate limits<br/>scale to zero"]
         vm["e2-micro VM<br/>agent worker (systemd)<br/>VAD, turn handling,<br/>watchdog + fallbacks"]
-        sm["Secret Manager<br/>LiveKit key/secret,<br/>OTLP headers"]
+        sm["Secret Manager<br/>LiveKit key/secret, passcode,<br/>OTLP headers"]
         src["GCS<br/>agent source,<br/>content-addressed"]
+        ar["Artifact Registry<br/>client image"]
     end
 
     grafana["Grafana Cloud<br/>Prometheus + dashboard"]
 
-    browser -- "1 POST /api/token" --> tokens
+    browser -. "name lookup" .-> dns
+    browser -- "1 passcode, then POST /api/token" --> run
     browser -- "2 join room (WebRTC audio)" --> sfu
     sfu --> dispatch -- "3 job" --> vm
-    vm <-- "4 audio both ways (WSS + UDP)" --> sfu
+    vm <-- "4 audio both ways (WSS + UDP)<br/>+ transcript text stream" --> sfu
     vm -- "5 speech, text, tokens" --> inference
+    vm -. "voice, ElevenLabs mode" .-> eleven
     vm -- "turn latency (OTLP/HTTP)" --> grafana
-    sm -. "read at boot" .-> vm
+    sm -. "read at boot / cold start" .-> vm
+    sm -.-> run
     src -. "read at boot" .-> vm
+    ar -. "image" .-> run
 ```
 
 - **The VM only dials out.** It registers with LiveKit as a worker for `mini-kulu`, then
@@ -42,12 +48,17 @@ flowchart LR
 - **The browser never talks to the agent directly.** Its audio goes to LiveKit's media
   server; the agent joins the same room as another participant.
 - **The token server is the only place the LiveKit secret meets the browser path.** It signs
-  a short-lived token for one random room that also dispatches the agent. It runs on
-  localhost (a secure context for the microphone); hosting it needs a passcode and a rate
-  limit first.
+  a short-lived token for one random room that also dispatches the agent. Hosted, it runs on
+  Cloud Run behind a passcode (traded for a signed, HttpOnly session cookie) with per-IP rate
+  limits and a daily cap on new calls (`agent/access.py`); the same server runs on localhost
+  for development. It's out of the call path once the browser has joined.
+- **The page shows the call as it happens.** Waveforms come from Web Audio analysers on both
+  audio tracks; the agent's words arrive as a LiveKit text stream synchronized with its
+  speech, so the transcript and live caption fill in word by word.
 - **Models run behind LiveKit Inference**: one credential, swappable providers. Each of LLM
   and TTS has a backup from a different vendor (`agent/llm_watchdog.py`,
-  `agent/tts_fallback.py`).
+  `agent/tts_fallback.py`). ElevenLabs mode (off by default, own key) puts an ElevenLabs
+  voice in front of the Inference voices.
 
 ## One voice turn, and what each metric measures
 
@@ -73,8 +84,8 @@ sequenceDiagram
     A->>I: first sentence (TTS, 5 s timeout)
     I-->>A: first audio
     Note right of A: tts_ttfb
-    A->>LK: agent speech
-    LK->>U: audio
+    A->>LK: agent speech + transcript text stream
+    LK->>U: audio, words in step with it
     Note over U,A: e2e = end of user speech → agent starts speaking
 ```
 
@@ -91,20 +102,26 @@ failover shows up on the dashboard as a second model.
 | TTS errors or no audio for 5 s | backup voice speaks the sentence | `agent/tts_fallback.py` |
 | Browser refresh or network drop | agent keeps the session 30 s; rejoining with the same identity continues the conversation | `agent/rejoin.py` |
 | VM reboot | systemd restarts the worker; the startup script reinstalls from the pinned release | `infra/startup.sh.tftpl` |
+| Microphone blocked or missing | the call stays up; the mic button offers a retry | `web/app.js` |
+| Public link abused | passcode required for tokens; per-IP limits (401/429) and 100 new calls a day | `agent/access.py` |
 
 ## Deploys
 
 ```mermaid
 flowchart LR
-    pr["Pull request"] --> plan["tofu plan<br/>as tofu-planner<br/>(read-only)"]
+    pr["Pull request"] --> plan["tofu plan as tofu-planner<br/>(read-only)<br/>+ build the client image"]
     plan --> review["Review the plan<br/>in the job summary"]
     review --> merge["Merge to main"]
-    merge --> apply["tofu apply<br/>as tofu-deployer<br/>(main only)"]
+    merge --> push["Push the client image<br/>tag = hash of its files"]
+    push --> apply["tofu apply<br/>as tofu-deployer<br/>(main only)"]
+    apply --> run["Cloud Run: new revision<br/>(only if the image changed)"]
     apply --> upload["Upload agent files<br/>under a new content hash"]
-    upload --> replace["Replace the VM<br/>(immutable release)"]
+    upload --> replace["Replace the VM<br/>(only if the agent changed)"]
     replace --> boot["Boot: uv sync --frozen,<br/>secrets from Secret Manager,<br/>systemd starts the worker"]
 ```
 
 GitHub Actions authenticates with Workload Identity Federation: no service account keys
 exist. The LiveKit key and secret are ephemeral OpenTofu variables passed through write-only
 arguments, so they never appear in a plan or in the state ([infra/README.md](../infra/README.md)).
+The custom domain is a Cloud Run domain mapping in OpenTofu; Google issues and renews its
+certificate, which is why the Cloudflare record stays DNS only.

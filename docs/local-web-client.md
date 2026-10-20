@@ -1,7 +1,9 @@
 # Talking to the agent from a browser
 
-The agent runs on GCP (see `infra/`). To talk to it, run the small web client on your machine
-and open it in Safari or Chrome.
+The agent runs on GCP (see `infra/`). The easiest way to talk to it is the hosted page,
+[mini-kulu.esakrissa.com](https://mini-kulu.esakrissa.com) (passcode required). For
+development, run the same web client on your machine and open it in Safari or Chrome; with
+`CLIENT_PASSCODE` set in `agent/.env.local` it asks for the passcode too.
 
 ## How the pieces fit
 
