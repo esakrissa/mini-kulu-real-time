@@ -42,6 +42,7 @@ locals {
     "roles/compute.securityAdmin", # firewall rules
     "roles/iam.serviceAccountAdmin",
     "roles/iam.serviceAccountUser", # attach the agent's service account to the VM
+    "roles/run.admin",              # the hosted client, its public access and domain mapping
     "roles/secretmanager.admin",
     "roles/storage.admin",
   ]
@@ -96,4 +97,12 @@ resource "google_service_account_iam_member" "deployer_wif" {
   service_account_id = google_service_account.deployer.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${local.pool}/attribute.ref/refs/heads/main"
+}
+
+# The deployer pushes the client image; it can't touch any other repository.
+resource "google_artifact_registry_repository_iam_member" "deployer" {
+  repository = google_artifact_registry_repository.images.name
+  location   = google_artifact_registry_repository.images.location
+  role       = "roles/artifactregistry.writer"
+  member     = google_service_account.deployer.member
 }

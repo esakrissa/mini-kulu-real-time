@@ -45,12 +45,14 @@ locals {
     ["livekit-api-key", "livekit-api-secret"],
     var.otlp_endpoint == "" ? [] : ["otlp-headers"],
     var.tts_provider == "elevenlabs" ? ["elevenlabs-api-key"] : [],
+    local.client_enabled ? ["client-passcode"] : [],
   )
   secret_values = {
     "livekit-api-key"    = var.livekit_api_key
     "livekit-api-secret" = var.livekit_api_secret
     "otlp-headers"       = var.otlp_headers
     "elevenlabs-api-key" = var.elevenlabs_api_key
+    "client-passcode"    = var.client_passcode
   }
 }
 
@@ -74,7 +76,8 @@ resource "google_secret_manager_secret_version" "this" {
 }
 
 resource "google_secret_manager_secret_iam_member" "agent" {
-  for_each = google_secret_manager_secret.this
+  # The agent doesn't need the web client's passcode.
+  for_each = { for name, s in google_secret_manager_secret.this : name => s if name != "client-passcode" }
 
   secret_id = each.value.id
   role      = "roles/secretmanager.secretAccessor"

@@ -7,7 +7,7 @@ A small, working version of a realtime voice-agent path: browser ⇄ LiveKit (We
 
 ```mermaid
 flowchart LR
-    browser["Browser<br/>web/"] -- "token" --> tokens["Token server<br/>(localhost)"]
+    browser["Browser<br/>web/"] -- "passcode → token" --> tokens["Token server<br/>Cloud Run or localhost"]
     browser -- "WebRTC audio" --> sfu["LiveKit Cloud<br/>media server + dispatch"]
     sfu -- "job + audio" --> vm["Agent worker<br/>GCP e2-micro, OpenTofu"]
     vm -- "STT · LLM · TTS" --> inf["LiveKit Inference<br/>AssemblyAI · Gemma 4 → GPT-4.1 mini<br/>Fish Audio → Cartesia"]
@@ -185,7 +185,7 @@ p50/p95 queries: [observability/README.md](observability/README.md).
 - [x] Day 6: Grafana p50/p95 dashboard; LLM watchdog + backup model; TTS fallback
 - [x] Day 7: scale notes, [migration plan](docs/migration-plan.md), [demo script](docs/demo-script.md)
 
-## Roadmap (next)
+## Roadmap
 
 - [x] **ElevenLabs mode, switchable** (see Resilience): an ElevenLabs voice in front of the
   Inference voices, off by default. Notes: [docs/elevenlabs-integration.md](docs/elevenlabs-integration.md).
@@ -194,7 +194,8 @@ p50/p95 queries: [observability/README.md](observability/README.md).
   speaks, a sweep while it thinks), the agent's words streaming in as it says them (live caption
   + transcript), consecutive user segments merged into one bubble, and the reply latency the
   page sees on each answer. Still one static page, no build step.
-- **Hosted client on Cloud Run, behind a passcode.** The token server and page as a
-  scale-to-zero Cloud Run service in OpenTofu (slim image built in CI, free tier), with a
-  passcode gate on `/api/token` (passcode in Secret Manager, signed session cookie) and a
-  per-IP rate limit, so a public link can't spend the LiveKit inference credit.
+- [x] **Hosted client on Cloud Run, behind a passcode**: the token server and page as a
+  scale-to-zero Cloud Run service in OpenTofu (slim image built and pushed by CI, free tier), a
+  passcode gate on `/api/token` (passcode in Secret Manager, signed HttpOnly session cookie), per-IP
+  rate limits and a daily call cap, and an optional custom domain. Setup:
+  [infra/README.md](infra/README.md#hosted-web-client-cloud-run).

@@ -1,14 +1,16 @@
 # `tofu plan` on pull requests, `tofu apply` on main. Keyless: GitHub's OIDC token is exchanged
 # for short-lived GCP credentials (Workload Identity Federation, set up by infra/bootstrap).
 # A change under agent/ is a deploy too: it uploads a new release and replaces the VM.
+# With CLIENT_ENABLED, the hosted web client (client.Dockerfile) is built on every run, pushed
+# to Artifact Registry on main, and deployed to Cloud Run by the same apply.
 name: Infra
 
 on:
   pull_request:
-    paths: [infra/**, agent/**, .github/workflows/infra.yml]
+    paths: [infra/**, agent/**, web/**, client.Dockerfile, .github/workflows/infra.yml]
   push:
     branches: [main]
-    paths: [infra/**, agent/**, .github/workflows/infra.yml]
+    paths: [infra/**, agent/**, web/**, client.Dockerfile, .github/workflows/infra.yml]
   workflow_dispatch:
 
 # Never run two applies (or an apply and a plan) against the same state at once.
@@ -34,7 +36,12 @@ env:
   TF_VAR_tts_provider: ${{ vars.TTS_PROVIDER || 'inference' }}
   TF_VAR_elevenlabs_voice_id: ${{ vars.ELEVEN_VOICE_ID }}
   TF_VAR_elevenlabs_api_key: ${{ secrets.ELEVEN_API_KEY }}
-
+  # Hosted client: set the CLIENT_ENABLED variable to "true" and the CLIENT_PASSCODE secret;
+  # CLIENT_DOMAIN (optional) maps a custom domain.
+  TF_VAR_client_passcode: ${{ secrets.CLIENT_PASSCODE }}
+  TF_VAR_client_domain: ${{ vars.CLIENT_DOMAIN }}
+  CLIENT_ENABLED: ${{ vars.CLIENT_ENABLED }}
+  CLIENT_FILES: client.Dockerfile agent/requirements-client.txt agent/token_server.py agent/access.py agent/tokens.py web/index.html web/app.js
 # Both jobs skip until the repository variables from infra/README.md are set.
 jobs:
   plan:
@@ -45,6 +52,18 @@ jobs:
         working-directory: infra
     steps:
       - uses: actions/checkout@v7
+      # The tag is a hash of everything in the image, so an unchanged client isn't redeployed.
+      - name: Client image name
+        if: env.CLIENT_ENABLED == 'true'
+        working-directory: .
+        run: |
+          tag=$(cat $CLIENT_FILES | sha256sum | cut -c1-12)
+          echo "CLIENT_IMAGE=${{ vars.GCP_REGION || 'us-central1' }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/mini-kulu/client:$tag" >> "$GITHUB_ENV"
+          echo "TF_VAR_client_image=${{ vars.GCP_REGION || 'us-central1' }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/mini-kulu/client:$tag" >> "$GITHUB_ENV"
+      - name: Build the client image (not pushed)
+        if: env.CLIENT_ENABLED == 'true'
+        working-directory: .
+        run: docker build -f client.Dockerfile -t "$CLIENT_IMAGE" .
       - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -73,10 +92,33 @@ jobs:
         working-directory: infra
     steps:
       - uses: actions/checkout@v7
+      # The tag is a hash of everything in the image, so an unchanged client isn't redeployed.
+      - name: Client image name
+        if: env.CLIENT_ENABLED == 'true'
+        working-directory: .
+        run: |
+          tag=$(cat $CLIENT_FILES | sha256sum | cut -c1-12)
+          echo "CLIENT_IMAGE=${{ vars.GCP_REGION || 'us-central1' }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/mini-kulu/client:$tag" >> "$GITHUB_ENV"
+          echo "TF_VAR_client_image=${{ vars.GCP_REGION || 'us-central1' }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/mini-kulu/client:$tag" >> "$GITHUB_ENV"
       - uses: google-github-actions/auth@v3
+        id: auth
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }} # only trusted on refs/heads/main
+          token_format: access_token
+      - name: Push the client image
+        if: env.CLIENT_ENABLED == 'true'
+        working-directory: .
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          echo "$ACCESS_TOKEN" | docker login -u oauth2accesstoken --password-stdin "${CLIENT_IMAGE%%/*}"
+          if docker manifest inspect "$CLIENT_IMAGE" >/dev/null 2>&1; then
+            echo "$CLIENT_IMAGE already pushed"
+          else
+            docker build -f client.Dockerfile -t "$CLIENT_IMAGE" .
+            docker push "$CLIENT_IMAGE"
+          fi
       - uses: opentofu/setup-opentofu@v2
         with:
           tofu_version: 1.13.1

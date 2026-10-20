@@ -14,3 +14,8 @@ output "planner_service_account" {
 output "deployer_service_account" {
   value = google_service_account.deployer.email
 }
+
+output "image_repository" {
+  description = "Where CI pushes the client image (the CLIENT_ENABLED flow in infra.yml)."
+  value       = "${google_artifact_registry_repository.images.location}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.images.repository_id}"
+}
