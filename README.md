@@ -3,31 +3,44 @@
 A small, working version of a realtime voice-agent path: browser ⇄ LiveKit (WebRTC) ⇄ Python agent
 (STT → LLM → TTS), with per-stage latency metrics, resilience, and all infra in OpenTofu on GCP.
 
+**Try it: [mini-kulu.esakrissa.com](https://mini-kulu.esakrissa.com)** (passcode on request: every
+call spends LiveKit inference credit). Press the green phone and talk.
+
 ## Architecture
 
 ```mermaid
 flowchart LR
-    browser["Browser<br/>web/"] -- "passcode → token" --> tokens["Token server<br/>Cloud Run or localhost"]
+    browser["Browser<br/>mini-kulu.esakrissa.com"] -- "passcode → token" --> tokens["Token server + page<br/>Cloud Run (or localhost)"]
     browser -- "WebRTC audio" --> sfu["LiveKit Cloud<br/>media server + dispatch"]
     sfu -- "job + audio" --> vm["Agent worker<br/>GCP e2-micro, OpenTofu"]
-    vm -- "STT · LLM · TTS" --> inf["LiveKit Inference<br/>AssemblyAI · Gemma 4 → GPT-4.1 mini<br/>Fish Audio → Cartesia"]
+    vm -- "STT · LLM · TTS" --> inf["LiveKit Inference<br/>AssemblyAI · Gemma 4 → GPT-4.1 mini<br/>Fish Audio → Cartesia<br/>(ElevenLabs optional)"]
     vm -- "turn latency (OTLP)" --> graf["Grafana Cloud<br/>p50/p95 dashboard"]
     gh["GitHub Actions<br/>plan on PR, apply on main"] -- "keyless (WIF)" --> vm
+    gh -- "client image" --> tokens
 ```
 
 The agent only dials out (no public ports), each model has a backup from another vendor, and
-every turn's latency per stage goes to one OpenTelemetry histogram. Full diagrams (a voice turn
+every turn's latency per stage goes to one OpenTelemetry histogram. The page and token endpoint
+run on scale-to-zero Cloud Run behind a passcode and per-IP rate limits. Full diagrams (a voice turn
 mapped to its metrics, failure handling, the deploy pipeline): [docs/architecture.md](docs/architecture.md).
 
 ## Demo
 
-| A call from the browser | LiveKit's own view of a session |
-|---|---|
-| ![Web client mid-call: three questions answered, the agent remembers the first](docs/img/web-client-call.png) | ![LiveKit Cloud agent insights: 9 turns, waveforms, latency breakdown](docs/img/livekit-agent-insights.png) |
+A call on [mini-kulu.esakrissa.com](https://mini-kulu.esakrissa.com) with the deployed agent
+(questions played into a fake microphone). The waveform follows whoever is talking (green for
+the agent), the agent's words stream into the caption and the transcript as it says them, and
+each reply shows the latency the page saw, here 0.40 and 0.60 s.
 
-Left: the web client during a call with the deployed agent (prompts played into a fake mic). Right:
-LiveKit Cloud's agent insights for the first cloud run, which measures the same stages
-independently of this project's metrics. All sessions: [docs/img/livekit-sessions.png](docs/img/livekit-sessions.png).
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/web-client-call-dark.png">
+  <img alt="mini-kulu call page mid-call: green waveform while the agent speaks, live caption, transcript with reply latencies of 0.40 and 0.60 seconds" src="docs/img/web-client-call-light.png">
+</picture>
+
+LiveKit Cloud's own agent insights for the first cloud run measure the same stages
+independently of this project's metrics (all sessions:
+[docs/img/livekit-sessions.png](docs/img/livekit-sessions.png)):
+
+![LiveKit Cloud agent insights: 9 turns, waveforms, latency breakdown](docs/img/livekit-agent-insights.png)
 
 The p50/p95 dashboard ([observability/dashboard.json](observability/dashboard.json)) on Grafana
 Cloud, over the 30-turn run plus a forced voice failover (the Cartesia series and the 4 backup turns):
@@ -126,8 +139,10 @@ scripts/web-client.sh start safari  # token endpoint + page on http://localhost:
 scripts/web-client.sh stop
 ```
 
-Click **Start call** and talk. The page gets a token from `POST /api/token` (LiveKit's standard
-token-endpoint format), and the token dispatches the `mini-kulu` agent into a fresh room. Reloading
+Press the green phone and talk. The page gets a token from `POST /api/token` (LiveKit's
+standard token-endpoint format), and the token dispatches the `mini-kulu` agent into a fresh
+room. With `CLIENT_PASSCODE` in `agent/.env.local` the page asks for it first, like the hosted
+one; leave it out to skip the gate locally. Reloading
 the page rejoins the same room and the agent carries on with the same conversation (it waits
 `AGENT_REJOIN_GRACE_S`, 30 s); **Hang up** ends the agent's session at once over RPC. More:
 [docs/local-web-client.md](docs/local-web-client.md).
