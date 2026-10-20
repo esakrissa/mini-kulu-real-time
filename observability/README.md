@@ -62,14 +62,23 @@ Grafana Cloud's free tier (10k active series, 14 days of history) is plenty: the
 
 ## Queries (PromQL)
 
-p50 / p95 per stage over the dashboard window:
+Every call runs in its own job process, so every call is a new series (`service.instance.id`).
+With a 60 s export interval a short call leaves one or two samples, and `increase()` / `rate()`
+see nothing: they need two samples and never count the first. The dashboard therefore counts
+each series' last value minus its value one window earlier, or 0 for a series that is new:
 
 ```promql
-histogram_quantile(0.95,
-  sum by (le, stage) (rate(mini_kulu_turn_stage_latency_seconds_bucket[$__rate_interval])))
+# turns per stage over the dashboard range
+sum by (stage) (
+    last_over_time(mini_kulu_turn_stage_latency_seconds_count[$__range])
+  - (last_over_time(mini_kulu_turn_stage_latency_seconds_count[$__range] offset $__range)
+     or last_over_time(mini_kulu_turn_stage_latency_seconds_count[$__range]) * 0))
 ```
 
-Turns per minute: `sum(rate(mini_kulu_turn_stage_latency_seconds_count{stage="e2e"}[5m])) * 60`
+p50 / p95 use the same difference on `_bucket` inside `histogram_quantile(0.95, sum by (le, stage) (…))`.
+The time series panels use it with `[$__interval]` and a minimum interval of 2 minutes, so each
+point holds the turns that ended in that step (a shorter window than the export interval could
+miss a sample and count a call twice).
 
 Percentiles from buckets are interpolated, so they're only as exact as the bucket edges; the
 README's latency table also lists raw p50/p95 from the synthetic caller's own measurements.

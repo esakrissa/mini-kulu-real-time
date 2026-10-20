@@ -36,18 +36,18 @@ them, and each reply shows the latency the page saw: 0.43 and 0.42 s here.
   <img alt="mini-kulu call page after two questions: caption of the last answer, transcript with reply latencies of 0.53, 0.43 and 0.42 seconds" src="docs/img/web-client-call-light.png">
 </picture>
 
-LiveKit Cloud's own agent insights for the first cloud run measure the same stages
-independently of this project's metrics (all sessions:
+LiveKit Cloud's own agent insights measure the same stages independently of this project's
+metrics. A 7-turn call on the hosted page (20 Oct), average reply ~1.06 s (all sessions:
 [docs/img/livekit-sessions.png](docs/img/livekit-sessions.png)):
 
-![LiveKit Cloud agent insights: 9 turns, waveforms, latency breakdown](docs/img/livekit-agent-insights.png)
+![LiveKit Cloud agent insights: 7 turns, waveforms, latency breakdown, average reply about 1,058 ms](docs/img/livekit-agent-insights.png)
 
 The p50/p95 dashboard ([observability/dashboard.json](observability/dashboard.json)) on Grafana
-Cloud, over the 30-turn run plus a forced voice failover (the Cartesia series and the 4 backup turns):
+Cloud, over the 9 calls made on the hosted page on 20 Oct (23 replies):
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/grafana-dashboard-dark.png">
-  <img alt="Grafana dashboard: e2e p50 2.34 s, p95 3.66 s, per-stage table, LLM and TTS latency by model" src="docs/img/grafana-dashboard-light.png">
+  <img alt="Grafana dashboard: e2e p50 1.23 s, p95 2.92 s over 23 replies, per-stage table, LLM and TTS latency by model" src="docs/img/grafana-dashboard-light.png">
 </picture>
 
 ## Performance
@@ -70,6 +70,10 @@ and the p50 grows to 2.5 s. The metric and the agent's VAD warnings pinpoint it:
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/stage-latency-healthy-vs-starved-dark.png">
   <img alt="Per-stage p50, healthy vs CPU-starved turns: end of turn 0.36 → 1.24 s, LLM first token 0.19 → 1.01 s, end to end 0.96 → 2.51 s" src="docs/img/stage-latency-healthy-vs-starved-light.png">
 </picture>
+
+Short calls on the hosted page (20 Oct, 23 replies, no VAD warnings) stay in the healthy band:
+e2e p50 1.2 s, LLM first token 0.19 s, first audio 0.40 s. Their p95 (2.9 s) is not CPU: in 7 of
+28 user turns the turn detector waited its full 2.5 s because the sentence sounded unfinished.
 
 Regenerate the charts: `uv run --no-project --with matplotlib python scripts/plot_latency.py docs/data/cloud-30-turns.jsonl`.
 
