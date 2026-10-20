@@ -27,13 +27,13 @@ mapped to its metrics, failure handling, the deploy pipeline): [docs/architectur
 ## Demo
 
 A call on [mini-kulu.esakrissa.com](https://mini-kulu.esakrissa.com) with the deployed agent
-(questions played into a fake microphone). The waveform follows whoever is talking (green for
-the agent), the agent's words stream into the caption and the transcript as it says them, and
-each reply shows the latency the page saw, here 0.40 and 0.60 s.
+(two questions played into a fake microphone). While someone talks the waveform follows them
+(green for the agent), the agent's words stream into the caption and the transcript as it says
+them, and each reply shows the latency the page saw: 0.43 and 0.42 s here.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/web-client-call-dark.png">
-  <img alt="mini-kulu call page mid-call: green waveform while the agent speaks, live caption, transcript with reply latencies of 0.40 and 0.60 seconds" src="docs/img/web-client-call-light.png">
+  <img alt="mini-kulu call page after two questions: caption of the last answer, transcript with reply latencies of 0.53, 0.43 and 0.42 seconds" src="docs/img/web-client-call-light.png">
 </picture>
 
 LiveKit Cloud's own agent insights for the first cloud run measure the same stages
