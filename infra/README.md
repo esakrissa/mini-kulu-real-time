@@ -4,8 +4,8 @@ OpenTofu for the agent's GCP side. Two stacks:
 
 | Stack | State | What it creates |
 |---|---|---|
-| `bootstrap/` | local, applied once by hand | APIs, the GCS state bucket, GitHub Actions identities (Workload Identity Federation), a budget alert |
-| `.` (this folder) | GCS bucket from `bootstrap/` | network + IAP SSH firewall rule, the agent's service account, Secret Manager secrets, a source bucket, the agent VM |
+| `bootstrap/` | local, applied once by hand | APIs, the GCS state bucket, GitHub Actions identities (Workload Identity Federation), the client's image repository, a budget alert |
+| `.` (this folder) | GCS bucket from `bootstrap/` | network + IAP SSH firewall rule, the agent's service account, Secret Manager secrets, a source bucket, the agent VM, and (optional) the hosted web client on Cloud Run |
 
 ```
 GitHub Actions ──OIDC──► Workload Identity Federation ──► tofu-planner (PRs) / tofu-deployer (main)
@@ -29,7 +29,9 @@ Everything is sized to the [free tier](https://cloud.google.com/free/docs/free-c
 | Compute Engine | 1 e2-micro in us-central1/us-east1/us-west1, 30 GB pd-standard | 1 e2-micro, 20 GB pd-standard |
 | External IPv4 (ephemeral) | first 744 hours/month on standard VMs, then USD 0.005/hour | 1 address, up to 744 hours |
 | Egress | 1 GB/month from North America | agent audio to LiveKit: ~0.5 MB per call minute |
-| Secret Manager | 6 active secret versions, 10k accesses/month | 2–4 versions, read once per boot |
+| Secret Manager | 6 active secret versions, 10k accesses/month | 2–5 versions, read once per boot / client cold start |
+| Cloud Run (hosted client) | 180k vCPU-s, 360k GiB-s, 2M requests/month (request-based billing) | scale to zero, max 1 instance; one call = a few requests |
+| Artifact Registry | 0.5 GB storage | the client image (~60 MB), newest 3 kept |
 | Cloud Storage | 5 GB-months in US regions | state file + ~0.5 MB per agent release |
 | Workload Identity Federation, IAM, budgets | free | |
 
@@ -105,10 +107,39 @@ Repository settings, from `tofu -chdir=infra/bootstrap output`:
 | Variable | `OTLP_ENDPOINT` | optional |
 | Secret | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | from LiveKit Cloud |
 | Secret | `OTLP_HEADERS` | optional |
+| Variable | `TTS_PROVIDER`, `ELEVEN_VOICE_ID` + secret `ELEVEN_API_KEY` | optional: ElevenLabs mode |
+| Variable | `CLIENT_ENABLED` = `true` + secret `CLIENT_PASSCODE` (8+ chars) | optional: the hosted client |
+| Variable | `CLIENT_DOMAIN` | optional: a custom domain for it (see below) |
 
 Until the secrets are set, `tofu plan` stops at variable validation, so a half-configured
 repository can't replace the VM with an empty config. Also create a `production` environment (Settings → Environments) for the apply job; add
 required reviewers there if applies should wait for a click.
+
+## Hosted web client (Cloud Run)
+
+With `CLIENT_ENABLED=true`, every Infra run builds `client.Dockerfile` (the token server, its
+three dependencies and `web/`, ~60 MB), tagged with a hash of those files. On `main` the deployer
+pushes it to the Artifact Registry repository from `bootstrap/` and the same `tofu apply` points
+the Cloud Run service at it. The service scales to zero, runs at most one instance, and reads
+the LiveKit key/secret and its passcode from Secret Manager.
+
+Access (`agent/access.py`): the page is public; `POST /api/unlock` trades the passcode for a
+signed, HttpOnly session cookie (12 h), and `POST /api/token` only answers with that cookie.
+Per client IP: 5 passcode attempts and 10 tokens per 10 minutes; at most 100 new calls a day.
+
+### Custom domain
+
+`google_cloud_run_domain_mapping` needs the identity that applies it (the `tofu-deployer`
+service account in CI) to be a **verified owner** of the domain:
+
+1. [Google Search Console](https://search.google.com/search-console) → Add property → Domain →
+   `example.com`; add the TXT record it shows at your DNS provider and click Verify.
+2. In that property: Settings → Users and permissions → Add user → the
+   `deployer_service_account` email from `tofu -chdir=bootstrap output` → Owner.
+3. Set the `CLIENT_DOMAIN` variable (e.g. `demo.example.com`) and re-run the Infra workflow.
+4. Create the record from `tofu output client_dns_records` (a CNAME to `ghs.googlehosted.com.`)
+   **as DNS only** (on Cloudflare: grey cloud). Google issues the certificate once it resolves,
+   usually within 15–60 minutes.
 
 ## Tearing down
 

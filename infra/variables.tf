@@ -116,3 +116,29 @@ variable "elevenlabs_voice_id" {
   type        = string
   default     = ""
 }
+
+variable "client_image" {
+  description = "Container image of the hosted web client (built by CI from client.Dockerfile). Empty: no Cloud Run client."
+  type        = string
+  default     = ""
+}
+
+variable "client_passcode" {
+  description = "Passcode the hosted client asks for before it hands out a LiveKit token."
+  type        = string
+  default     = ""
+  sensitive   = true
+  ephemeral   = true
+
+  # A public token endpoint without a passcode would spend the LiveKit credit for anyone.
+  validation {
+    condition     = var.client_image == "" || length(var.client_passcode) >= 8
+    error_message = "client_image is set but client_passcode is shorter than 8 characters (is the CLIENT_PASSCODE secret set?)."
+  }
+}
+
+variable "client_domain" {
+  description = "Custom domain for the hosted client, e.g. demo.example.com. Empty: only the run.app URL."
+  type        = string
+  default     = ""
+}

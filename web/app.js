@@ -16,7 +16,6 @@ import {
   Room,
   RoomEvent,
   Track,
-  TokenSource,
   createAudioAnalyser,
 } from 'https://cdn.jsdelivr.net/npm/livekit-client@2.22.4/+esm';
 
@@ -27,7 +26,6 @@ const HANGUP_RPC = 'mini_kulu.hang_up'; // agent/rejoin.py
 const MIC_TIMEOUT_MS = 8_000;
 
 const $ = (id) => document.getElementById(id);
-const tokens = TokenSource.endpoint('/api/token');
 let room = null;
 let heartbeat = null;
 let startedAt = null;
@@ -343,7 +341,7 @@ function setMicState(on, warn = false) {
   mic.classList.toggle('warn', warn);
 }
 
-// -- call ----------------------------------------------------------------------------------
+// -- room events ---------------------------------------------------------------------------
 
 function wireRoom(r) {
   r.on(RoomEvent.ConnectionStateChanged, (state) => setConnection(state))
@@ -398,13 +396,72 @@ function wireRoom(r) {
   });
 }
 
+// -- passcode gate (hosted client) ---------------------------------------------------------
+
+class GateError extends Error {}
+
+function showGate(message = '') {
+  $('gate').hidden = false;
+  $('gate-error').textContent = message;
+  $('call').disabled = true;
+  $('state-text').textContent = 'locked';
+  $('passcode').focus();
+}
+
+async function checkGate() {
+  try {
+    const cfg = await (await fetch('/api/config', { cache: 'no-store' })).json();
+    if (cfg.passcode_required && !cfg.unlocked) {
+      showGate();
+      return false;
+    }
+  } catch (err) {
+    console.warn('no /api/config; assuming no passcode', err);
+  }
+  return true;
+}
+
+$('gate').onsubmit = async (e) => {
+  e.preventDefault();
+  const resp = await fetch('/api/unlock', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ passcode: $('passcode').value }),
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    $('gate-error').textContent = body.error ?? `error ${resp.status}`;
+    return;
+  }
+  $('passcode').value = '';
+  $('gate').hidden = true;
+  $('call').disabled = false;
+  $('state-text').textContent = 'ready';
+};
+
+// -- call ----------------------------------------------------------------------------------
+
+// LiveKit's standard token-endpoint request (what TokenSource.endpoint sends), fetched by hand
+// so a 401 (passcode) or 429 (rate limit) can be told apart.
+async function fetchToken(session) {
+  const resp = await fetch('/api/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      room_name: session?.roomName,
+      participant_identity: session?.identity,
+      room_config: { agents: [{ agent_name: AGENT_NAME }] },
+    }),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (resp.status === 401) throw new GateError(body.error ?? 'passcode required');
+  if (!resp.ok) throw new Error(body.error ?? `token request failed (${resp.status})`);
+  return { serverUrl: body.server_url, participantToken: body.participant_token };
+}
+
 async function connect(session) {
   setConnection('fetching token');
-  const { serverUrl, participantToken } = await tokens.fetch({
-    agentName: AGENT_NAME,
-    roomName: session?.roomName,
-    participantIdentity: session?.identity,
-  });
+  const { serverUrl, participantToken } = await fetchToken(session);
 
   room = new Room({ adaptiveStream: true, dynacast: true });
   wireRoom(room);
@@ -453,14 +510,17 @@ async function start(session = null) {
     await connect(session);
   } catch (err) {
     console.error(err);
-    note(`could not connect: ${err.message ?? err}`);
-    setConnection('failed');
+    setConnection(err instanceof GateError ? 'idle' : 'failed');
     sessionStorage.removeItem(SESSION_KEY);
     await room?.disconnect();
-  } finally {
-    call.disabled = false;
+    room = null; // a failed connect may never fire Disconnected
+    setInCall(false);
     call.classList.remove('busy');
+    if (err instanceof GateError) return showGate('Enter the passcode to start a call.');
+    note(`could not connect: ${err.message ?? err}`);
   }
+  call.disabled = false;
+  call.classList.remove('busy');
 }
 
 async function hangUp() {
@@ -490,4 +550,4 @@ $('resume-audio').onclick = () => room?.startAudio();
 window.addEventListener('pagehide', saveSession);
 
 const previous = loadSession();
-if (previous) start(previous);
+if (await checkGate() && previous) start(previous);

@@ -31,12 +31,14 @@ data "google_project" "this" {}
 locals {
   # Everything the app stack and CI use is enabled here, so neither needs Service Usage admin.
   services = [
+    "artifactregistry.googleapis.com",
     "billingbudgets.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
     "iap.googleapis.com",
+    "run.googleapis.com",
     "secretmanager.googleapis.com",
     "storage.googleapis.com",
     "sts.googleapis.com",
@@ -72,6 +74,35 @@ resource "google_storage_bucket" "state" {
     }
     action {
       type = "Delete"
+    }
+  }
+
+  depends_on = [google_project_service.this]
+}
+
+# --- Container images for the hosted web client ----------------------------------------------
+
+# Cloud Run needs an image; CI builds the client's (~60 MB) and pushes it here. The free tier
+# covers 0.5 GB of storage, so only the newest few images are kept.
+resource "google_artifact_registry_repository" "images" {
+  repository_id = "mini-kulu"
+  location      = var.region
+  format        = "DOCKER"
+  description   = "Images for the hosted web client (Cloud Run)"
+
+  cleanup_policy_dry_run = false
+  cleanup_policies {
+    id     = "keep-newest-3"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 3
+    }
+  }
+  cleanup_policies {
+    id     = "delete-older-than-a-day"
+    action = "DELETE"
+    condition {
+      older_than = "86400s"
     }
   }
 

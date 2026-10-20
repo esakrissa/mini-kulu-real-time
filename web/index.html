@@ -336,6 +336,51 @@
         cursor: pointer;
       }
 
+      /* Passcode gate (hosted client only). */
+      .gate {
+        display: grid;
+        gap: 8px;
+        width: min(100%, 320px);
+      }
+      .gate label {
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .gate-row {
+        display: flex;
+        gap: 8px;
+      }
+      .gate input {
+        flex: 1;
+        min-width: 0;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+        color: var(--ink);
+        font: 400 14px var(--mono);
+      }
+      .gate input:focus {
+        outline: 2px solid var(--brand);
+        outline-offset: 1px;
+      }
+      .gate button {
+        padding: 10px 16px;
+        border: none;
+        border-radius: 12px;
+        background: var(--brand);
+        color: var(--brand-ink);
+        font-weight: 400;
+        cursor: pointer;
+      }
+      .gate-error {
+        min-height: 1.2em;
+        margin: 0;
+        font-size: 11px;
+        color: var(--danger);
+      }
+
       /* -- transcript ----------------------------------------------------------------------- */
       .transcript {
         display: flex;
@@ -503,6 +548,14 @@
           <canvas id="wave" aria-hidden="true"></canvas>
           <div class="state mono" id="state"><span class="caret"></span><span id="state-text">ready</span></div>
           <p class="caption" id="caption" aria-live="polite"></p>
+          <form class="gate" id="gate" hidden>
+            <label class="mono" for="passcode">passcode</label>
+            <div class="gate-row">
+              <input id="passcode" type="password" autocomplete="current-password" required />
+              <button type="submit">Unlock</button>
+            </div>
+            <p class="gate-error mono" id="gate-error" role="alert"></p>
+          </form>
           <button class="hint mono" id="resume-audio" hidden>Tap to enable audio</button>
         </div>
         <div class="controls">
