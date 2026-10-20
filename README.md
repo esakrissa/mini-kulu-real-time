@@ -3,8 +3,6 @@
 A small, working version of a realtime voice-agent path: browser ⇄ LiveKit (WebRTC) ⇄ Python agent
 (STT → LLM → TTS), with per-stage latency metrics, resilience, and all infra in OpenTofu on GCP.
 
-> Work in progress: the README's scale notes and the migration plan come next. Status below.
-
 ## Architecture
 
 ```mermaid
@@ -61,6 +59,35 @@ and the p50 grows to 2.5 s. The metric and the agent's VAD warnings pinpoint it:
 </picture>
 
 Regenerate the charts: `uv run --no-project --with matplotlib python scripts/plot_latency.py docs/data/cloud-30-turns.jsonl`.
+
+## What I'd do at Kulu's scale
+
+This repo runs one worker on a free VM. Running many concurrent calls for enterprise customers
+changes five things:
+
+- **Workers next to the media.** Run agent pools in several regions, each next to the LiveKit
+  SFU region it serves (us-central1 ↔ "US Central" here), and let LiveKit dispatch to the
+  nearest one. Every hop between the SFU and the worker is paid twice per turn (audio in, audio
+  out), and the inference endpoints should be in the same region too.
+- **TURN for enterprise networks.** Corporate firewalls often block UDP and anything but 443.
+  LiveKit Cloud includes TURN over TLS on 443; self-hosted, run TURN/TLS on 443 behind its own
+  domain, and track the share of calls that fall back to TURN (it adds latency and egress).
+- **SLOs on what the caller feels.** SLO: e2e turn latency p95 < 1.5 s and < 1% of turns served
+  by a backup model, per region, over 28 days. Alert on the burn rate, not on single slow turns.
+  Add leading indicators from this repo's findings: the VAD "slower than realtime" warning and
+  event-loop stalls fire minutes before p95 moves, so they page first.
+- **Size workers on CPU per concurrent call.** The 30-turn run showed the failure mode: a
+  starved CPU makes voice-activity detection fall behind and e2e goes from ~1 s to ~2.5 s with
+  no error anywhere. Measure CPU per concurrent call under load (noise cancellation on, since it
+  costs the most), set each worker's `load_fnc`/`load_threshold` so LiveKit stops dispatching
+  before that point, and autoscale the pool on worker load instead of request count.
+- **Cost per call minute, as a dashboard.** STT + LLM tokens + TTS characters + agent CPU-minutes
+  + TURN egress, per minute of call. Most of it is inference, so the levers are model choice,
+  caching the system prompt, and cutting wasted generations (interruptions, false end-of-turn).
+  Backup models only bill when they serve a turn, so resilience is close to free.
+
+The AWS → GCP move itself (parallel run, database cutover, DNS, rollback) is in
+[docs/migration-plan.md](docs/migration-plan.md).
 
 ## Layout
 
@@ -149,7 +176,7 @@ p50/p95 queries: [observability/README.md](observability/README.md).
 - [x] Day 4: OpenTofu on GCP (free tier), remote state, write-only secrets, budget alert
 - [x] Day 5: CI (tests, tofu validate, secret scan), keyless plan/apply, deployed
 - [x] Day 6: Grafana p50/p95 dashboard; LLM watchdog + backup model; TTS fallback
-- [ ] Day 7: scale notes, migration plan, video
+- [x] Day 7: scale notes, [migration plan](docs/migration-plan.md), [demo script](docs/demo-script.md)
 
 ## Roadmap (next)
 
