@@ -4,79 +4,543 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>mini-kulu</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Google+Sans+Code:wght@400;500&family=Inter:wght@300;400;500&display=swap"
+    />
     <style>
       :root {
-        color-scheme: light dark;
-        font-family: system-ui, sans-serif;
+        color-scheme: light;
+        --bg: #ffffff;
+        --surface: #f9f9f9;
+        --card: #ffffff;
+        --ink: #0b0b0c;
+        --muted: #8f8f8f;
+        --soft: #6f6f6a;
+        --line: #ececec;
+        --brand: #005230; /* Kulu green */
+        --brand-ink: #ffffff;
+        --brand-soft: #e7f1ec;
+        --danger: #d6453d;
+        --user: #1f2937;
+        --wave-idle: #d4d4d4;
+        --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.05);
+        --sans: Inter, ui-sans-serif, system-ui, sans-serif;
+        --mono: 'Google Sans Code', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --bg: #0c0d0c;
+          --surface: #131513;
+          --card: #161816;
+          --ink: #f2f3f2;
+          --muted: #8a8f8b;
+          --soft: #a8ada9;
+          --line: #262926;
+          --brand: #2f9e6b;
+          --brand-ink: #04140c;
+          --brand-soft: #14271d;
+          --danger: #ef5b52;
+          --user: #e5e7eb;
+          --wave-idle: #3a3d3a;
+          --shadow: none;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
       }
       body {
-        max-width: 40rem;
-        margin: 2rem auto;
-        padding: 0 1rem;
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 300 15px/1.5 var(--sans);
+        -webkit-font-smoothing: antialiased;
       }
-      header {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        flex-wrap: wrap;
-      }
-      h1 {
-        font-size: 1.25rem;
-        margin: 0 auto 0 0;
+      .mono {
+        font-family: var(--mono);
+        font-weight: 400;
+        letter-spacing: 0.02em;
       }
       button {
         font: inherit;
-        padding: 0.4rem 0.9rem;
+        color: inherit;
+      }
+
+      /* -- top bar -------------------------------------------------------------------------- */
+      .top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 14px 24px;
+        border-bottom: 1px solid var(--line);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--ink);
+        text-decoration: none;
+        font: 500 17px var(--sans);
+        letter-spacing: -0.02em;
+      }
+      .brand svg {
+        width: 20px;
+        height: 20px;
+      }
+      .brand .dot {
+        color: var(--brand);
+      }
+      .readouts {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 9px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+      }
+      .pill b {
+        color: var(--ink);
+        font-weight: 500;
+      }
+      .led {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--wave-idle);
+      }
+      .led[data-on='ok'] {
+        background: var(--brand);
+        box-shadow: 0 0 0 3px var(--brand-soft);
+      }
+      .led[data-on='warn'] {
+        background: #d99a2b;
+      }
+      .led[data-on='bad'] {
+        background: var(--danger);
+      }
+
+      /* -- layout --------------------------------------------------------------------------- */
+      main {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+        gap: 20px;
+        max-width: 1120px;
+        margin: 28px auto;
+        padding: 0 24px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+      .card-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--line);
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .card-head b {
+        color: var(--ink);
+        font-weight: 500;
+      }
+
+      /* -- call stage ----------------------------------------------------------------------- */
+      .call {
+        display: flex;
+        flex-direction: column;
+        min-height: 560px;
+      }
+      .visual {
+        position: relative;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        padding: 28px 24px 8px;
+        background: radial-gradient(120% 70% at 50% 40%, var(--brand-soft), transparent 70%),
+          var(--surface);
+      }
+      h1 {
+        margin: 0;
+        font-weight: 300;
+        font-size: clamp(24px, 3.2vw, 32px);
+        letter-spacing: -0.03em;
+        text-align: center;
+      }
+      .sub {
+        margin: -10px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+        text-align: center;
+      }
+      #wave {
+        width: 100%;
+        max-width: 460px;
+        height: 120px;
+      }
+      .state {
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--soft);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .state .caret {
+        width: 7px;
+        height: 13px;
+        background: var(--brand);
+        animation: blink 1s steps(1) infinite;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+
+      /* Live caption: what the agent is saying right now, word by word. */
+      .caption {
+        min-height: 3.2em;
+        max-width: 34rem;
+        margin: 0;
+        padding: 0 8px;
+        text-align: center;
+        font-size: 19px;
+        line-height: 1.45;
+        letter-spacing: -0.01em;
+        color: var(--ink);
+      }
+      .caption.user {
+        color: var(--soft);
+      }
+      .caption .word {
+        animation: rise 0.25s ease-out both;
+      }
+      @keyframes rise {
+        from {
+          opacity: 0;
+          filter: blur(3px);
+        }
+      }
+
+      .controls {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 18px;
+        padding: 20px 24px 26px;
+        background: var(--surface);
+      }
+      .round {
+        display: grid;
+        place-items: center;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        border: 1px solid var(--line);
+        background: var(--card);
+        cursor: pointer;
+        transition: transform 0.15s, background 0.2s, color 0.2s, border-color 0.2s;
+      }
+      .round:hover:not(:disabled) {
+        transform: translateY(-1px);
+      }
+      .round:active:not(:disabled) {
+        transform: scale(0.96);
+      }
+      .round:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .round:focus-visible {
+        outline: 2px solid var(--brand);
+        outline-offset: 3px;
+      }
+      .round svg {
+        width: 22px;
+        height: 22px;
+      }
+      #mic[aria-pressed='false'] {
+        background: var(--ink);
+        color: var(--bg);
+        border-color: var(--ink);
+      }
+      #mic.warn {
+        border-color: #d99a2b;
+        color: #d99a2b;
+      }
+      #mic .off,
+      #mic[aria-pressed='false'] .on {
+        display: none;
+      }
+      #mic[aria-pressed='false'] .off {
+        display: block;
+      }
+      #call {
+        width: 68px;
+        height: 68px;
+        border: none;
+        background: var(--brand);
+        color: var(--brand-ink);
+      }
+      #call svg {
+        width: 26px;
+        height: 26px;
+        transition: transform 0.25s;
+      }
+      #call.live {
+        background: var(--danger);
+        color: #fff;
+      }
+      #call.live svg {
+        transform: rotate(135deg);
+      }
+      #call.busy {
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        50% {
+          box-shadow: 0 0 0 10px var(--brand-soft);
+        }
+      }
+      .hint {
+        position: absolute;
+        bottom: 10px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 12px;
         cursor: pointer;
       }
-      #status {
-        margin: 1rem 0;
-        font-size: 0.9rem;
-        opacity: 0.8;
-      }
-      #status b {
-        font-weight: 600;
+
+      /* -- transcript ----------------------------------------------------------------------- */
+      .transcript {
+        display: flex;
+        flex-direction: column;
+        max-height: 560px;
       }
       #transcript {
         list-style: none;
-        padding: 0;
+        margin: 0;
+        padding: 18px;
+        overflow-y: auto;
+        flex: 1;
         display: flex;
         flex-direction: column;
-        gap: 0.5rem;
+        gap: 14px;
+        scroll-behavior: smooth;
       }
-      #transcript li {
-        padding: 0.5rem 0.75rem;
-        border-radius: 0.5rem;
-        max-width: 85%;
-        background: color-mix(in srgb, currentColor 8%, transparent);
+      .empty {
+        margin: auto;
+        color: var(--muted);
+        font-size: 13px;
+        text-align: center;
+        max-width: 18rem;
       }
-      #transcript li.user {
+      .msg {
+        display: grid;
+        gap: 4px;
+        max-width: 92%;
+      }
+      .msg .meta {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        font-size: 10.5px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .msg .who {
+        color: var(--ink);
+        font-weight: 500;
+      }
+      .msg.agent .who {
+        color: var(--brand);
+      }
+      .msg .lat {
+        padding: 0 5px;
+        border: 1px solid var(--line);
+        text-transform: none;
+      }
+      .msg p {
+        margin: 0;
+        padding: 10px 14px;
+        border-radius: 4px 14px 14px 14px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        font-size: 14.5px;
+        line-height: 1.5;
+      }
+      .msg.user {
         align-self: flex-end;
-        background: color-mix(in srgb, #3b82f6 25%, transparent);
+        justify-items: end;
       }
-      #transcript li.interim {
-        opacity: 0.6;
+      .msg.user p {
+        border-radius: 14px 4px 14px 14px;
+        background: var(--brand-soft);
+        border-color: transparent;
       }
-      #transcript li.note {
+      .msg .interim {
+        color: var(--muted);
+      }
+      .msg.speaking p::after {
+        content: '';
+        display: inline-block;
+        width: 6px;
+        height: 12px;
+        margin-left: 3px;
+        vertical-align: -1px;
+        background: var(--brand);
+        animation: blink 1s steps(1) infinite;
+      }
+      .note {
         align-self: center;
-        background: none;
-        font-size: 0.8rem;
+        font-size: 10.5px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .note::before,
+      .note::after {
+        content: ' — ';
         opacity: 0.6;
+      }
+
+      footer {
+        max-width: 1120px;
+        margin: 0 auto 28px;
+        padding: 0 24px;
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      footer a {
+        color: inherit;
+      }
+
+      @media (max-width: 860px) {
+        main {
+          grid-template-columns: 1fr;
+          margin: 16px auto;
+          padding: 0 16px;
+          gap: 16px;
+        }
+        .top {
+          padding: 12px 16px;
+        }
+        .call {
+          min-height: 0;
+        }
+        .visual {
+          padding-top: 22px;
+        }
+        .transcript {
+          max-height: none;
+          min-height: 260px;
+        }
+        footer {
+          padding: 0 16px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition: none !important;
+        }
       }
     </style>
   </head>
   <body>
-    <header>
-      <h1>mini-kulu</h1>
-      <button id="start">Start call</button>
-      <button id="resume-audio" hidden>Tap to enable audio</button>
-      <button id="enable-mic" hidden>Enable mic</button>
-      <button id="hangup" hidden>Hang up</button>
+    <header class="top">
+      <a class="brand" href="/" aria-label="mini-kulu home">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <path d="M4 2v16M10 2v16M16 2v16M2 7h16M2 13h16" />
+        </svg>
+        <span>mini-kulu<span class="dot">.</span></span>
+      </a>
+      <div class="readouts mono" aria-live="polite">
+        <span class="pill"><i class="led" id="conn-led"></i>conn <b id="conn">idle</b></span>
+        <span class="pill"><i class="led" id="agent-led"></i>agent <b id="agent">–</b></span>
+      </div>
     </header>
-    <p id="status">
-      Connection: <b id="conn">idle</b> · Agent: <b id="agent">–</b>
-    </p>
-    <ul id="transcript"></ul>
+
+    <main>
+      <section class="card call" aria-label="Call">
+        <div class="card-head mono">
+          <span>live voice session</span>
+          <span><b id="timer">00:00</b></span>
+        </div>
+        <div class="visual">
+          <h1 id="title">Talk to the agent</h1>
+          <p class="sub" id="subtitle">Browser ⇄ LiveKit WebRTC ⇄ STT → LLM → TTS</p>
+          <canvas id="wave" aria-hidden="true"></canvas>
+          <div class="state mono" id="state"><span class="caret"></span><span id="state-text">ready</span></div>
+          <p class="caption" id="caption" aria-live="polite"></p>
+          <button class="hint mono" id="resume-audio" hidden>Tap to enable audio</button>
+        </div>
+        <div class="controls">
+          <button class="round" id="mic" aria-pressed="true" aria-label="Mute microphone" disabled>
+            <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+              <rect x="9" y="3" width="6" height="12" rx="3" />
+              <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+            </svg>
+            <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+              <path d="M15 9.5V6a3 3 0 0 0-5.7-1.3M9 9v3a3 3 0 0 0 4.6 2.5M5 11a7 7 0 0 0 11.3 5.5M19 11a7 7 0 0 1-.6 2.8M12 18v3M3 3l18 18" />
+            </svg>
+          </button>
+          <button class="round" id="call" aria-label="Start call">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.3 0 .7-.2 1l-2.3 2.2Z" />
+            </svg>
+          </button>
+        </div>
+      </section>
+
+      <section class="card transcript" aria-label="Transcript">
+        <div class="card-head mono">
+          <span>transcript</span>
+          <span><b id="turns">0</b> turns</span>
+        </div>
+        <ol id="transcript">
+          <li class="empty" id="empty">Press the green phone to start. The agent greets you, then just talk: your words and its replies appear here as they're spoken.</li>
+        </ol>
+      </section>
+    </main>
+
+    <footer class="mono">
+      <span>LiveKit Agents · Python</span>
+      <span>GCP · OpenTofu</span>
+      <span>p50 ≈ 1 s end to end</span>
+      <a href="https://github.com/esakrissa/mini-kulu-real-time">source ↗</a>
+    </footer>
+
     <div id="audio" hidden></div>
     <script type="module" src="/app.js"></script>
   </body>
