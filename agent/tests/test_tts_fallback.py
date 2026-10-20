@@ -121,7 +121,10 @@ def test_unknown_tts_provider_fails_fast():
         use_elevenlabs("openai", "key")
 
 
-def test_elevenlabs_leads_the_chain_with_inference_behind():
+def test_elevenlabs_leads_the_chain_with_inference_behind(monkeypatch):
+    # The Inference voices need credentials to construct (no network call is made).
+    monkeypatch.setenv("LIVEKIT_API_KEY", "test-key")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "test-secret")
     eleven = elevenlabs_tts("test-key")
     assert eleven.model == ELEVENLABS_MODEL
     chain = build_tts(first=[eleven])
