@@ -53,6 +53,10 @@
       * {
         box-sizing: border-box;
       }
+      /* Components set display (grid, flex), which would otherwise beat the hidden attribute. */
+      [hidden] {
+        display: none !important;
+      }
       body {
         margin: 0;
         background: var(--bg);
