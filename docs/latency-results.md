@@ -1,5 +1,38 @@
 # Latency results
 
+## Calls on the hosted page (20 Oct 2026)
+
+Nine short calls through https://mini-kulu.esakrissa.com (Safari with a real microphone, and
+the fake-microphone screenshot runs), release `agent-117afb30d27e` on the e2-micro, VM booted
+~6 min before the first call. Agent-side numbers from the logs; Grafana (fixed dashboard, see
+below) gives the same counts and p50s within bucket interpolation.
+
+| Stage | n | p50 | p95 | max |
+|---|---|---|---|---|
+| `stt_final` | 27 | 0.38 s | 0.58 s | 0.78 s |
+| `end_of_turn` | 28 | 0.48 s | 2.50 s | 2.50 s |
+| `llm_ttft` | 33 | 0.19 s | 0.42 s | 0.87 s |
+| `tts_ttfb` | 33 | 0.40 s | 0.58 s | 0.61 s |
+| `e2e` | 23 | 1.20 s | 2.92 s | 2.94 s |
+
+Without the turns where the turn detector waited its full 2.5 s: e2e p50 1.09 s, p95 1.36 s
+(n = 16). LiveKit Cloud's agent insights agree: the 7-turn call `RM_KHSCm8SAcAzb` averages a
+~1.06 s reply, the 3-turn Safari call `RM_sanRnHqLwgVb` ~1.01 s (e2e 1.20 and 0.95 s).
+
+- **No CPU starvation**: no "slower than realtime" warnings, load 0.0 between calls; only
+  "event loop blocked" at job start (imports, 0.1–2.4 s, before the greeting). Calls of 1–2
+  minutes never use up the burst.
+- **The p95 is the turn detector.** 7 of 28 user turns hit the 2.5 s maximum endpointing delay
+  (the model judged the sentence unfinished, e.g. a trailing pause after "Can you hear me"). The
+  next lever is the endpointing delays and the turn detector's threshold, not more CPU.
+- LLM first token 0.19 s p50 (19 Oct's 30-turn run: 0.75 s while CPU-starved).
+
+**The dashboard showed nothing for these calls until it was fixed.** Every call runs in its own
+job process, so it gets its own series (`service.instance.id`), and with a 60 s export interval a
+short call leaves one or two samples. `increase()` and `rate()` need two samples and never count
+the first one, so the panels read 0 turns. The queries now take each series' last value minus its
+value one window earlier (or 0 for a new series); see [observability/README.md](../observability/README.md).
+
 ## 30-turn run with metrics in Grafana Cloud (19 Oct 2026)
 
 Same setup as below, on release `agent-af2a33983bbe` (LLM watchdog on, no failover happened),

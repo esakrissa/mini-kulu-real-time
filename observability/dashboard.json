@@ -53,7 +53,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (increase(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"e2e\"}[$__range])))",
+          "expr": "histogram_quantile(0.5, sum by (le) ((last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"e2e\"}[$__range]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"e2e\"}[$__range] offset $__range) or last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"e2e\"}[$__range]) * 0))))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -118,7 +118,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (increase(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"e2e\"}[$__range])))",
+          "expr": "histogram_quantile(0.95, sum by (le) ((last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"e2e\"}[$__range]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"e2e\"}[$__range] offset $__range) or last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"e2e\"}[$__range]) * 0))))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -183,7 +183,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(increase(mini_kulu_turn_stage_latency_seconds_count{stage=\"e2e\"}[$__range]))",
+          "expr": "sum((last_over_time(mini_kulu_turn_stage_latency_seconds_count{stage=\"e2e\"}[$__range]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_count{stage=\"e2e\"}[$__range] offset $__range) or last_over_time(mini_kulu_turn_stage_latency_seconds_count{stage=\"e2e\"}[$__range]) * 0)))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -240,7 +240,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(sum(increase(mini_kulu_turn_stage_latency_seconds_count{stage=\"llm_ttft\", model!=\"google/gemma-4-31b-it\"}[$__range])) or vector(0)) + (sum(increase(mini_kulu_turn_stage_latency_seconds_count{stage=\"tts_ttfb\", model!=\"fishaudio/s2.1-pro\"}[$__range])) or vector(0))",
+          "expr": "(sum((last_over_time(mini_kulu_turn_stage_latency_seconds_count{stage=\"llm_ttft\", model!=\"google/gemma-4-31b-it\"}[$__range]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_count{stage=\"llm_ttft\", model!=\"google/gemma-4-31b-it\"}[$__range] offset $__range) or last_over_time(mini_kulu_turn_stage_latency_seconds_count{stage=\"llm_ttft\", model!=\"google/gemma-4-31b-it\"}[$__range]) * 0))) or vector(0)) + (sum((last_over_time(mini_kulu_turn_stage_latency_seconds_count{stage=\"tts_ttfb\", model!=\"fishaudio/s2.1-pro\"}[$__range]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_count{stage=\"tts_ttfb\", model!=\"fishaudio/s2.1-pro\"}[$__range] offset $__range) or last_over_time(mini_kulu_turn_stage_latency_seconds_count{stage=\"tts_ttfb\", model!=\"fishaudio/s2.1-pro\"}[$__range]) * 0))) or vector(0))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -296,7 +296,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, stage) (increase(mini_kulu_turn_stage_latency_seconds_bucket{}[$__range])))",
+          "expr": "histogram_quantile(0.5, sum by (le, stage) ((last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{}[$__range]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{}[$__range] offset $__range) or last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{}[$__range]) * 0))))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -308,7 +308,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, stage) (increase(mini_kulu_turn_stage_latency_seconds_bucket{}[$__range])))",
+          "expr": "histogram_quantile(0.95, sum by (le, stage) ((last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{}[$__range]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{}[$__range] offset $__range) or last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{}[$__range]) * 0))))",
           "legendFormat": "",
           "refId": "B",
           "instant": true,
@@ -320,7 +320,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (stage) (increase(mini_kulu_turn_stage_latency_seconds_count[$__range]))",
+          "expr": "sum by (stage) ((last_over_time(mini_kulu_turn_stage_latency_seconds_count[$__range]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_count[$__range] offset $__range) or last_over_time(mini_kulu_turn_stage_latency_seconds_count[$__range]) * 0)))",
           "legendFormat": "",
           "refId": "C",
           "instant": true,
@@ -395,7 +395,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "LLM first token by model",
-      "description": "A failover shows up as a second series.",
+      "description": "A failover shows up as a second series. One point per 2 minutes: the turns that ended in it.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -412,7 +412,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, model) (rate(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"llm_ttft\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le, model) ((last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"llm_ttft\"}[$__interval]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"llm_ttft\"}[$__interval] offset $__interval) or last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"llm_ttft\"}[$__interval]) * 0))))",
           "legendFormat": "p50 {{model}}",
           "refId": "A"
         },
@@ -421,7 +421,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, model) (rate(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"llm_ttft\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, model) ((last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"llm_ttft\"}[$__interval]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"llm_ttft\"}[$__interval] offset $__interval) or last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"llm_ttft\"}[$__interval]) * 0))))",
           "legendFormat": "p95 {{model}}",
           "refId": "B"
         }
@@ -436,7 +436,8 @@
           }
         },
         "overrides": []
-      }
+      },
+      "interval": "2m"
     },
     {
       "id": 7,
@@ -458,7 +459,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, stage) (rate(mini_kulu_turn_stage_latency_seconds_bucket{}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, stage) ((last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{}[$__interval]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{}[$__interval] offset $__interval) or last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{}[$__interval]) * 0))))",
           "legendFormat": "{{stage}}",
           "refId": "A"
         }
@@ -473,7 +474,9 @@
           }
         },
         "overrides": []
-      }
+      },
+      "interval": "2m",
+      "description": "One point per 2 minutes: the turns that ended in it."
     },
     {
       "id": 8,
@@ -495,7 +498,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, stage) (rate(mini_kulu_turn_stage_latency_seconds_bucket{}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le, stage) ((last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{}[$__interval]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{}[$__interval] offset $__interval) or last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{}[$__interval]) * 0))))",
           "legendFormat": "{{stage}}",
           "refId": "A"
         }
@@ -510,13 +513,15 @@
           }
         },
         "overrides": []
-      }
+      },
+      "interval": "2m",
+      "description": "One point per 2 minutes: the turns that ended in it."
     },
     {
       "id": 9,
       "type": "timeseries",
       "title": "TTS first audio by model",
-      "description": "A voice failover shows up as a second series.",
+      "description": "A voice failover shows up as a second series. One point per 2 minutes: the turns that ended in it.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -533,7 +538,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, model) (rate(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"tts_ttfb\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le, model) ((last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"tts_ttfb\"}[$__interval]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"tts_ttfb\"}[$__interval] offset $__interval) or last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"tts_ttfb\"}[$__interval]) * 0))))",
           "legendFormat": "p50 {{model}}",
           "refId": "A"
         },
@@ -542,7 +547,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, model) (rate(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"tts_ttfb\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, model) ((last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"tts_ttfb\"}[$__interval]) - (last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"tts_ttfb\"}[$__interval] offset $__interval) or last_over_time(mini_kulu_turn_stage_latency_seconds_bucket{stage=\"tts_ttfb\"}[$__interval]) * 0))))",
           "legendFormat": "p95 {{model}}",
           "refId": "B"
         }
@@ -557,7 +562,8 @@
           }
         },
         "overrides": []
-      }
+      },
+      "interval": "2m"
     }
   ]
 }
