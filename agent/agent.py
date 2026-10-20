@@ -1,9 +1,9 @@
 """Mini-Kulu voice agent: STT -> LLM -> TTS over LiveKit.
 
 All models are served by LiveKit Inference (one set of LiveKit credentials, no extra provider
-keys). The LLM runs behind a watchdog with a backup model (llm_watchdog), the voice behind a
-fallback to a second vendor (tts_fallback). Each turn's per-stage
-latency is recorded by turn_metrics and pushed over OTLP.
+keys), with an optional ElevenLabs voice in front. The LLM runs behind a watchdog with a backup
+model (llm_watchdog), the voice behind a fallback to a second vendor (tts_fallback). Each
+turn's per-stage latency is recorded by turn_metrics and pushed over OTLP.
 """
 
 import logging
@@ -18,7 +18,14 @@ from livekit.plugins import ai_coustics
 from llm_watchdog import BACKUP_MODEL, PRIMARY_MODEL, SESSION_LLM_CONN_OPTIONS, Apology, build_llm
 from rejoin import HANGUP_RPC, RejoinGrace
 from tokens import AGENT_NAME  # explicit dispatch: only join rooms that ask for this name
-from tts_fallback import BACKUP_VOICE, PRIMARY_VOICE, build_tts, session_tts_conn_options
+from tts_fallback import (
+    BACKUP_VOICE,
+    PRIMARY_VOICE,
+    build_tts,
+    elevenlabs_tts,
+    session_tts_conn_options,
+    use_elevenlabs,
+)
 from turn_metrics import process_turn_metrics
 
 load_dotenv(".env.local")
@@ -47,6 +54,13 @@ TTS_VOICES = [
     for v in os.getenv("AGENT_TTS_VOICES", f"{PRIMARY_VOICE},{BACKUP_VOICE}").split(",")
     if v.strip()
 ]
+
+# ElevenLabs mode: "elevenlabs" puts an ElevenLabs voice (your own key) in front of TTS_VOICES.
+# Off by default; without ELEVEN_API_KEY it logs a warning and stays on Inference.
+ELEVEN_API_KEY = os.getenv("ELEVEN_API_KEY", "")
+USE_ELEVENLABS = use_elevenlabs(os.getenv("AGENT_TTS_PROVIDER", "inference"), ELEVEN_API_KEY)
+ELEVEN_VOICE_ID = os.getenv("ELEVEN_VOICE_ID") or None
+ELEVEN_MODEL = os.getenv("ELEVEN_MODEL") or None
 
 # ai-coustics noise cancellation: on for real calls. Turn it off (=0) for synthetic test runs:
 # it costs CPU on a slow laptop and counts against the plan's monthly noise-cancellation minutes.
@@ -80,7 +94,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     session = AgentSession(
         stt=inference.STT(model="assemblyai/universal-3-6-pro", language="en"),
         llm=build_llm(LLM_TIMEOUT_S, LLM_MODELS),
-        tts=build_tts(TTS_VOICES),
+        tts=build_tts(
+            TTS_VOICES,
+            first=[elevenlabs_tts(ELEVEN_API_KEY, ELEVEN_VOICE_ID, ELEVEN_MODEL)]
+            if USE_ELEVENLABS
+            else [],
+        ),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(),
         ),

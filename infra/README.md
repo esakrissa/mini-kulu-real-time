@@ -29,7 +29,7 @@ Everything is sized to the [free tier](https://cloud.google.com/free/docs/free-c
 | Compute Engine | 1 e2-micro in us-central1/us-east1/us-west1, 30 GB pd-standard | 1 e2-micro, 20 GB pd-standard |
 | External IPv4 (ephemeral) | first 744 hours/month on standard VMs, then USD 0.005/hour | 1 address, up to 744 hours |
 | Egress | 1 GB/month from North America | agent audio to LiveKit: ~0.5 MB per call minute |
-| Secret Manager | 6 active secret versions, 10k accesses/month | 2–3 versions, read once per boot |
+| Secret Manager | 6 active secret versions, 10k accesses/month | 2–4 versions, read once per boot |
 | Cloud Storage | 5 GB-months in US regions | state file + ~0.5 MB per agent release |
 | Workload Identity Federation, IAM, budgets | free | |
 

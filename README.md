@@ -145,6 +145,13 @@ Try the failover: `AGENT_LLM_MODELS=openai/does-not-exist,google/gemma-4-31b-it`
 `AGENT_TTS_VOICES=fishaudio/does-not-exist:x,cartesia/sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc`
 on a local agent; the backup answers and the dashboard shows the second model.
 
+**ElevenLabs mode (optional).** `AGENT_TTS_PROVIDER=elevenlabs` with your own `ELEVEN_API_KEY`
+puts an ElevenLabs voice (`eleven_flash_v2_5`, `ELEVEN_VOICE_ID` to pick one) at the front of the
+voice chain; Fish Audio and Cartesia stay behind it as the fallback, so a bad key or an
+ElevenLabs outage costs one sentence, not the call. It's off by default, and without a key the
+agent logs a warning and stays on LiveKit Inference. On GCP: set the repository variable
+`TTS_PROVIDER=elevenlabs` and the secret `ELEVEN_API_KEY`, then re-run the Infra workflow.
+
 ## Test without a microphone
 
 `agent/synthetic_caller.py` joins over WebRTC like a browser, speaks prompts rendered with macOS
@@ -180,10 +187,8 @@ p50/p95 queries: [observability/README.md](observability/README.md).
 
 ## Roadmap (next)
 
-- **ElevenLabs mode, switchable.** An env toggle (e.g. `AGENT_TTS_PROVIDER=elevenlabs`) that puts
-  ElevenLabs (`eleven_flash_v2_5` or v4 Turbo, own API key) first in the voice chain, with the
-  LiveKit Inference voices as the fallback; off by default, so the stack keeps working with
-  only LiveKit credentials. Notes: [docs/elevenlabs-integration.md](docs/elevenlabs-integration.md).
+- [x] **ElevenLabs mode, switchable** (see Resilience): an ElevenLabs voice in front of the
+  Inference voices, off by default. Notes: [docs/elevenlabs-integration.md](docs/elevenlabs-integration.md).
 - **A cleaner client UI.** A minimal call screen: one microphone button (mute/unmute, call
   state), a live voice waveform for the user and the agent (Web Audio analyser on the local and
   remote tracks), and a modern transcript (speaker labels, timestamps, interim text streaming

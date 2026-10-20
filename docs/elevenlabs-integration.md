@@ -1,6 +1,9 @@
 # ElevenLabs TTS integration (research notes)
 
-**Status:** researched 14 Oct 2026, **not implemented**. Reference for adding ElevenLabs as a
+**Status:** researched 14 Oct 2026; **implemented 20 Oct 2026** as ElevenLabs mode
+(`AGENT_TTS_PROVIDER=elevenlabs`, see `agent/tts_fallback.py` and the README's Resilience
+section). It uses `eleven_flash_v2_5` by default (`ELEVEN_MODEL` to try v4 Turbo) with the
+Inference voices behind it. The notes below are the original research. Reference for adding ElevenLabs as a
 TTS provider, most likely as the primary voice with the current LiveKit Inference TTS as the
 automatic fallback (the "second TTS provider" resilience requirement).
 

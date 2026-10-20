@@ -30,6 +30,10 @@ env:
   TF_VAR_livekit_api_key: ${{ secrets.LIVEKIT_API_KEY }}
   TF_VAR_livekit_api_secret: ${{ secrets.LIVEKIT_API_SECRET }}
   TF_VAR_otlp_headers: ${{ secrets.OTLP_HEADERS }}
+  # ElevenLabs mode: set the TTS_PROVIDER variable to "elevenlabs" and the ELEVEN_API_KEY secret.
+  TF_VAR_tts_provider: ${{ vars.TTS_PROVIDER || 'inference' }}
+  TF_VAR_elevenlabs_voice_id: ${{ vars.ELEVEN_VOICE_ID }}
+  TF_VAR_elevenlabs_api_key: ${{ secrets.ELEVEN_API_KEY }}
 
 # Both jobs skip until the repository variables from infra/README.md are set.
 jobs:
