@@ -101,6 +101,7 @@ failover shows up on the dashboard as a second model.
 | Both LLMs fail | the agent apologizes instead of going silent; the session ends after 3 failed turns in a row | `agent/llm_watchdog.py` |
 | TTS errors or no audio for 5 s | backup voice speaks the sentence | `agent/tts_fallback.py` |
 | Browser refresh or network drop | agent keeps the session 30 s; rejoining with the same identity continues the conversation | `agent/rejoin.py` |
+| Web search or repo read slow or failing (MCP) | the tool returns one sentence after 4 s at most and the agent answers without it; the next call reconnects | `agent/agent_tools.py` |
 | VM reboot | systemd restarts the worker; the startup script reinstalls from the pinned release | `infra/startup.sh.tftpl` |
 | Microphone blocked or missing | the call stays up; the mic button offers a retry | `web/app.js` |
 | Public link abused | passcode required for tokens; per-IP limits (401/429) and 100 new calls a day | `agent/access.py` |
