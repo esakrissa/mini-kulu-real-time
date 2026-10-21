@@ -36,6 +36,12 @@ env:
   TF_VAR_tts_provider: ${{ vars.TTS_PROVIDER || 'inference' }}
   TF_VAR_elevenlabs_voice_id: ${{ vars.ELEVEN_VOICE_ID }}
   TF_VAR_elevenlabs_api_key: ${{ secrets.ELEVEN_API_KEY }}
+  # Agent tools: WEB_SEARCH=true + the EXA_API_KEY secret; REPO_TOOLS=true + the GH_MCP_TOKEN
+  # secret (fine-grained, public repositories read-only).
+  TF_VAR_web_search: ${{ vars.WEB_SEARCH || 'false' }}
+  TF_VAR_exa_api_key: ${{ secrets.EXA_API_KEY }}
+  TF_VAR_repo_tools: ${{ vars.REPO_TOOLS || 'false' }}
+  TF_VAR_gh_mcp_token: ${{ secrets.GH_MCP_TOKEN }}
   # Hosted client: set the CLIENT_ENABLED variable to "true" and the CLIENT_PASSCODE secret;
   # CLIENT_DOMAIN (optional) maps a custom domain.
   TF_VAR_client_passcode: ${{ secrets.CLIENT_PASSCODE }}

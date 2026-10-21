@@ -117,6 +117,46 @@ variable "elevenlabs_voice_id" {
   default     = ""
 }
 
+# Agent tools from remote MCP servers (agent/agent_tools.py). Each is off by default; the switch
+# is a plain bool because the secret's existence can't depend on an ephemeral value.
+variable "web_search" {
+  description = "Give the agent a web_search tool through Exa's hosted MCP server (billed per search on your Exa account)."
+  type        = bool
+  default     = false
+}
+
+variable "exa_api_key" {
+  description = "Exa API key, only used with web_search = true."
+  type        = string
+  default     = ""
+  sensitive   = true
+  ephemeral   = true
+
+  validation {
+    condition     = !var.web_search || length(var.exa_api_key) > 0
+    error_message = "web_search is on but exa_api_key is empty (is the EXA_API_KEY secret set?)."
+  }
+}
+
+variable "repo_tools" {
+  description = "Give the agent a read_project_file tool (this repository only) through GitHub's remote MCP server."
+  type        = bool
+  default     = false
+}
+
+variable "gh_mcp_token" {
+  description = "GitHub token for the MCP server: fine-grained, public repositories read-only. Only used with repo_tools = true."
+  type        = string
+  default     = ""
+  sensitive   = true
+  ephemeral   = true
+
+  validation {
+    condition     = !var.repo_tools || length(var.gh_mcp_token) > 0
+    error_message = "repo_tools is on but gh_mcp_token is empty (is the GH_MCP_TOKEN secret set?)."
+  }
+}
+
 variable "client_image" {
   description = "Container image of the hosted web client (built by CI from client.Dockerfile). Empty: no Cloud Run client."
   type        = string
