@@ -5,6 +5,11 @@ keys), with an optional ElevenLabs voice in front. The LLM runs behind a watchdo
 model (llm_watchdog), the voice behind a fallback to a second vendor (tts_fallback). Each
 turn's per-stage latency is recorded by turn_metrics and pushed over OTLP. Optional tools from
 remote MCP servers (agent_tools): web search through Exa, and reading this project's own repo.
+
+Sized for one shared-core e2-micro (0.25 vCPU sustained, bursts for a couple of minutes): the
+turn detector runs on LiveKit Inference instead of on the VM, and the session audio isn't
+recorded. With both on the VM, a call used ~0.4 vCPU, ran out of burst after ~2.5 minutes and
+the audio started breaking up (docs/latency-results.md).
 """
 
 import logging
@@ -39,6 +44,16 @@ from tts_fallback import (
 from turn_metrics import process_turn_metrics
 
 load_dotenv(".env.local")
+
+# "v1" (default) runs the end-of-turn model on LiveKit Inference (a free monthly allowance on
+# every plan). The SDK's default outside LiveKit Cloud is "v1-mini", which runs on our CPU: on
+# the e2-micro its predictions timed out and starved the audio. With v1 there is no local
+# fallback (that would load ~244 MB of weights mid-call): if Inference can't be reached, turns
+# end on the silence delay instead.
+TURN_DETECTOR = os.getenv("AGENT_TURN_DETECTOR", "v1")
+if TURN_DETECTOR == "v1":
+    # Nothing local to preload then; saves the e2-micro ~244 MB of RAM (it was swapping).
+    os.environ.setdefault("LIVEKIT_AGENTS_PRELOAD_LOCAL_INFERENCE", "0")
 
 logger = logging.getLogger("mini-kulu-agent")
 
@@ -89,6 +104,10 @@ TOOL_TIMEOUT_S = float(os.getenv("AGENT_TOOL_TIMEOUT_S", "4"))
 # Searches are billed per request (Exa), so each call gets a few.
 MAX_SEARCHES = int(os.getenv("AGENT_MAX_SEARCHES", "3"))
 
+# Session audio for LiveKit Cloud's agent insights: encoding both sides to Opus costs CPU for
+# the whole call. Transcripts and traces are still uploaded.
+RECORD_AUDIO = os.getenv("AGENT_RECORD_AUDIO", "0").strip().lower() in ("1", "true", "yes", "on")
+
 INSTRUCTIONS = """You are Kulu, a helpful voice assistant that joins live calls.
 Keep answers short and conversational: one to three sentences.
 Never use markdown, lists, emojis, or symbols that can't be spoken."""
@@ -128,7 +147,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             else [],
         ),
         turn_handling=TurnHandlingOptions(
-            turn_detection=inference.TurnDetector(),
+            turn_detection=inference.TurnDetector(
+                version=TURN_DETECTOR, local_fallback=TURN_DETECTOR != "v1"
+            ),
         ),
         conn_options=SessionConnectOptions(
             llm_conn_options=SESSION_LLM_CONN_OPTIONS,
@@ -178,6 +199,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     await session.start(
         room=ctx.room,
         agent=Assistant(tools),
+        record={"audio": RECORD_AUDIO},
         room_options=room_io.RoomOptions(
             # We decide when to end (RejoinGrace), so a refresh keeps the same session.
             # The returning user must use the same identity: room_io re-links by identity.
