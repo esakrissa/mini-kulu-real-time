@@ -3,7 +3,15 @@ import wave
 import numpy as np
 import pytest
 
-from synthetic_caller import SAMPLE_RATE, SAMPLES_PER_FRAME, SPEECH_RMS, is_audible, load_wav
+from synthetic_caller import (
+    SAMPLE_RATE,
+    SAMPLES_PER_FRAME,
+    SPEECH_RMS,
+    TEXT_PROMPTS,
+    answered,
+    is_audible,
+    load_wav,
+)
 
 
 def tone(amplitude: float) -> np.ndarray:
@@ -62,3 +70,12 @@ def test_load_wav_rejects_wrong_format(tmp_path):
     write_wav(path, tone(3 * SPEECH_RMS), rate=16000)
     with pytest.raises(ValueError, match="mono"):
         load_wav(path)
+
+
+def test_answered_matches_expected_words_case_insensitively():
+    assert answered("It's 33 Degrees and clear in Ubud.", ("degree", "rain"))
+    assert not answered("Sorry, I couldn't check just now.", ("degree", "rain"))
+
+
+def test_text_prompts_each_expect_something():
+    assert TEXT_PROMPTS and all(prompt and expect for prompt, expect in TEXT_PROMPTS)
