@@ -57,6 +57,12 @@ umask 077
   echo "ELEVEN_API_KEY=$(secret ${lookup(secrets, "elevenlabs-api-key", "")})"
   echo "ELEVEN_VOICE_ID=${eleven_voice_id}"
 %{ endif ~}
+%{ if web_search ~}
+  echo "EXA_API_KEY=$(secret ${lookup(secrets, "exa-api-key", "")})"
+%{ endif ~}
+%{ if repo_tools ~}
+  echo "GH_MCP_TOKEN=$(secret ${lookup(secrets, "gh-mcp-token", "")})"
+%{ endif ~}
 } > "$APP/agent/.env.local"
 umask 022
 chown -R "$USER_NAME:" "$APP"

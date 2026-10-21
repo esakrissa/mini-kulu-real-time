@@ -12,6 +12,7 @@ locals {
   agent_files = [
     ".python-version",
     "agent.py",
+    "agent_tools.py",
     "llm_watchdog.py",
     "pyproject.toml",
     "rejoin.py",
@@ -110,6 +111,8 @@ resource "google_compute_instance" "agent" {
     noise_cancellation = var.noise_cancellation ? "1" : "0"
     tts_provider       = var.tts_provider
     eleven_voice_id    = var.elevenlabs_voice_id
+    web_search         = var.web_search
+    repo_tools         = var.repo_tools
     secrets            = { for name, s in google_secret_manager_secret.this : name => s.secret_id }
   })
 

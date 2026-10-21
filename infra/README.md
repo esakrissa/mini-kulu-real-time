@@ -53,6 +53,10 @@ in the state. The state can't tell when a write-only value changes: bump `secret
 push new values. The VM reads them on boot with its own service account, which can access only
 these secrets and the source bucket.
 
+Secret Manager's free tier is 6 active secret versions. LiveKit key + secret, OTLP headers and
+the client passcode use 4; the two tool credentials make 6. Turning on ElevenLabs as well would
+be a 7th (about USD 0.06/month).
+
 ## First-time setup
 
 Needs `tofu` (1.11+), `gcloud` signed in with Owner on the project and Billing Account
@@ -108,6 +112,8 @@ Repository settings, from `tofu -chdir=infra/bootstrap output`:
 | Secret | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | from LiveKit Cloud |
 | Secret | `OTLP_HEADERS` | optional |
 | Variable | `TTS_PROVIDER`, `ELEVEN_VOICE_ID` + secret `ELEVEN_API_KEY` | optional: ElevenLabs mode |
+| Variable | `WEB_SEARCH` = `true` + secret `EXA_API_KEY` | optional: the agent's web search tool (Exa bills per search) |
+| Variable | `REPO_TOOLS` = `true` + secret `GH_MCP_TOKEN` | optional: the agent reads this repository (fine-grained token, public read-only) |
 | Variable | `CLIENT_ENABLED` = `true` + secret `CLIENT_PASSCODE` (8+ chars) | optional: the hosted client |
 | Variable | `CLIENT_DOMAIN` | optional: a custom domain for it (see below) |
 

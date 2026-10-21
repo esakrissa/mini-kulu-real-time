@@ -45,6 +45,8 @@ locals {
     ["livekit-api-key", "livekit-api-secret"],
     var.otlp_endpoint == "" ? [] : ["otlp-headers"],
     var.tts_provider == "elevenlabs" ? ["elevenlabs-api-key"] : [],
+    var.web_search ? ["exa-api-key"] : [],
+    var.repo_tools ? ["gh-mcp-token"] : [],
     local.client_enabled ? ["client-passcode"] : [],
   )
   secret_values = {
@@ -52,6 +54,8 @@ locals {
     "livekit-api-secret" = var.livekit_api_secret
     "otlp-headers"       = var.otlp_headers
     "elevenlabs-api-key" = var.elevenlabs_api_key
+    "exa-api-key"        = var.exa_api_key
+    "gh-mcp-token"       = var.gh_mcp_token
     "client-passcode"    = var.client_passcode
   }
 }
