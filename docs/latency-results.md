@@ -33,6 +33,29 @@ reach it ends on the silence delay) and its local weights aren't preloaded; sess
 recorded (`AGENT_RECORD_AUDIO`; transcripts and traces still are); 6 searches per call, and the
 limit is said plainly. The page now shows every tool call with its result or error.
 
+**After the change** (release `agent-d1f7a96a4a4d`, VM booted 10 minutes earlier): one 5-minute
+call, the ten spoken prompts twice plus six typed questions that need a tool (five web searches,
+one repository file), 17:54–18:00 UTC.
+
+| | Before (22 Oct calls) | After (5-minute call) |
+|---|---|---|
+| Turns answered | all, but up to 42.8 s `e2e` | 26 of 26, `e2e` p50 1.51 s / p95 3.28 s / max 3.75 s |
+| Tool calls | 1 timeout, search limit hit | 6 of 6, p50 1.45 s, max 2.0 s |
+| CPU during the call | ~21.9 CPU-s per minute, then capped | 18.6–18.7 CPU-s per minute (~0.31 vCPU) |
+| Cap reached | ~2.5 min into a call | ~4.2 min into the call |
+| VAD lag once capped | up to 45 s | up to 3.3 s |
+| "eot prediction timed out" | 6 | 0 |
+| Memory between calls | 675 MB + 282 MB swap | forkserver 160 MB (was 230), idle job 139 MB (was 250), swap < 40 MB |
+
+Other stages: `llm_ttft` p50 0.30 s, `tts_ttfb` p50 0.59 s, `end_of_turn` p50 0.44 s. Once
+capped, the last four replies took 3.5–5 s from the caller's side.
+
+**So: on the free e2-micro a call stays smooth for about 4 minutes.** A call still needs ~0.31
+vCPU against 0.25 sustained, so it uses up the burst credit, just more slowly. Left as it is (a
+demo call is 2 minutes). The remaining options: drop transcript synchronization (its
+speaking-rate estimate runs an FFT over every second of the agent's speech; the page would have
+to pace the caption itself), or an e2-small (0.5 vCPU sustained, billed).
+
 ## Calls on the hosted page (20 Oct 2026)
 
 Nine short calls through https://mini-kulu.esakrissa.com (Safari with a real microphone, and

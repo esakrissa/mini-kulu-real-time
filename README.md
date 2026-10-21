@@ -75,6 +75,13 @@ Short calls on the hosted page (20 Oct, 23 replies, no VAD warnings) stay in the
 e2e p50 1.2 s, LLM first token 0.19 s, first audio 0.40 s. Their p95 (2.9 s) is not CPU: in 7 of
 28 user turns the turn detector waited its full 2.5 s because the sentence sounded unfinished.
 
+**On the free e2-micro, a call stays smooth for about 4 minutes.** The VM sustains 0.25 vCPU and
+bursts above that on saved-up credit; a call needs ~0.31 vCPU. Running the turn detector on
+LiveKit Inference instead of the VM and not recording call audio (22 Oct) moved the slowdown from
+~2.5 to ~4 minutes into a call, and the worst lag in hearing the caller from 45 s to ~3 s. Past
+that point replies take 3–5 s instead of ~1.5 s. More CPU (an e2-small, billed) or less work per
+call (no word-synced transcript) would remove it; a 2-minute demo doesn't need either.
+
 Regenerate the charts: `uv run --no-project --with matplotlib python scripts/plot_latency.py docs/data/cloud-30-turns.jsonl`.
 
 ## What I'd do at Kulu's scale
