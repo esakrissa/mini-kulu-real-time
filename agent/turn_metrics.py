@@ -12,6 +12,8 @@ each stage as it happens, so a dashboard sees turns live rather than when the se
     llm_ttft     assistant  LLM request -> first token
     tts_ttfb     assistant  first text sent to TTS -> first audio back
     e2e          assistant  end of user speech -> agent starts speaking
+    tool_call    (a tool)   the agent calls a tool (web search, a repo file) -> its result;
+                            `model` is the tool's name; recorded by agent_tools, not a message
 
 All stages go into one histogram, `mini_kulu.turn.stage_latency` (unit s), labelled by `stage`
 and `model`, so p50/p95 per stage is a single query; a TTS fallback shows up as a second `model`.
@@ -57,6 +59,7 @@ ASSISTANT_STAGES = {
     "e2e": ("e2e_latency", "llm_metadata"),
 }
 STAGES = (*USER_STAGES, *ASSISTANT_STAGES)
+TOOL_STAGE = "tool_call"
 
 FLUSH_TIMEOUT_S = 5.0
 
@@ -98,6 +101,10 @@ class TurnMetrics:
                 extra={f"latency_{s}": v for s, (v, _) in stages.items()},
             )
         return stages
+
+    def record_tool_call(self, tool: str, seconds: float) -> None:
+        self._histogram.record(seconds, attributes={"stage": TOOL_STAGE, "model": tool})
+        logger.info("tool latency: %s=%.3fs", tool, seconds, extra={"latency_tool_call": seconds})
 
     def on_conversation_item_added(self, ev: Any) -> None:
         """AgentSession `conversation_item_added` handler. Never raises into the session."""

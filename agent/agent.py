@@ -3,7 +3,8 @@
 All models are served by LiveKit Inference (one set of LiveKit credentials, no extra provider
 keys), with an optional ElevenLabs voice in front. The LLM runs behind a watchdog with a backup
 model (llm_watchdog), the voice behind a fallback to a second vendor (tts_fallback). Each
-turn's per-stage latency is recorded by turn_metrics and pushed over OTLP.
+turn's per-stage latency is recorded by turn_metrics and pushed over OTLP. Optional tools from
+remote MCP servers (agent_tools): web search through Exa, and reading this project's own repo.
 """
 
 import logging
@@ -11,10 +12,19 @@ import os
 
 from dotenv import load_dotenv
 from livekit import agents, rtc
-from livekit.agents import Agent, AgentServer, AgentSession, TurnHandlingOptions, inference, room_io
+from livekit.agents import (
+    Agent,
+    AgentServer,
+    AgentSession,
+    TurnHandlingOptions,
+    inference,
+    llm,
+    room_io,
+)
 from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import ai_coustics
 
+from agent_tools import exa_search, github_files, project_file_tool, web_search_tool
 from llm_watchdog import BACKUP_MODEL, PRIMARY_MODEL, SESSION_LLM_CONN_OPTIONS, Apology, build_llm
 from rejoin import HANGUP_RPC, RejoinGrace
 from tokens import AGENT_NAME  # explicit dispatch: only join rooms that ask for this name
@@ -71,14 +81,31 @@ NOISE_CANCELLATION = os.getenv("AGENT_NOISE_CANCELLATION", "1").strip().lower() 
     "off",
 )
 
+# Tools from remote MCP servers, each on only when its credential is set. A tool call may take
+# at most AGENT_TOOL_TIMEOUT_S (connecting included); past that the answer comes without it.
+EXA_API_KEY = os.getenv("EXA_API_KEY", "")
+GH_MCP_TOKEN = os.getenv("GH_MCP_TOKEN", "")
+TOOL_TIMEOUT_S = float(os.getenv("AGENT_TOOL_TIMEOUT_S", "4"))
+# Searches are billed per request (Exa), so each call gets a few.
+MAX_SEARCHES = int(os.getenv("AGENT_MAX_SEARCHES", "3"))
+
 INSTRUCTIONS = """You are Kulu, a helpful voice assistant that joins live calls.
 Keep answers short and conversational: one to three sentences.
 Never use markdown, lists, emojis, or symbols that can't be spoken."""
 
+TOOL_INSTRUCTIONS = {
+    "web_search": "For news, weather, prices or anything recent, use web_search first. "
+    "Answer from the results in your own words; don't read out web addresses.",
+    "read_project_file": "You run on mini-kulu, an open-source project. When asked how you "
+    "work or are built, read the most relevant file with read_project_file and answer from it.",
+}
+
 
 class Assistant(Agent):
-    def __init__(self) -> None:
-        super().__init__(instructions=INSTRUCTIONS)
+    def __init__(self, tools: list[llm.Tool]) -> None:
+        names = [t.info.name for t in tools]
+        extra = [TOOL_INSTRUCTIONS[n] for n in names if n in TOOL_INSTRUCTIONS]
+        super().__init__(instructions="\n".join([INSTRUCTIONS, *extra]), tools=tools)
 
 
 server = AgentServer(
@@ -118,6 +145,21 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     session.on("conversation_item_added", turn_metrics.on_conversation_item_added)
     ctx.add_shutdown_callback(turn_metrics.flush)
 
+    # Remote tools connect in the background, so a slow MCP server never delays the greeting.
+    tools: list[llm.Tool] = []
+    remotes = []
+    if EXA_API_KEY:
+        search = exa_search(EXA_API_KEY, TOOL_TIMEOUT_S)
+        tools.append(web_search_tool(search, MAX_SEARCHES, turn_metrics.record_tool_call))
+        remotes.append(search)
+    if GH_MCP_TOKEN:
+        files = github_files(GH_MCP_TOKEN, TOOL_TIMEOUT_S)
+        tools.append(project_file_tool(files, on_latency=turn_metrics.record_tool_call))
+        remotes.append(files)
+    for remote in remotes:
+        remote.connect()
+        ctx.add_shutdown_callback(remote.aclose)
+
     grace = RejoinGrace(REJOIN_GRACE_S, ctx.shutdown)
 
     def is_user(p: rtc.RemoteParticipant) -> bool:
@@ -135,7 +177,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     await session.start(
         room=ctx.room,
-        agent=Assistant(),
+        agent=Assistant(tools),
         room_options=room_io.RoomOptions(
             # We decide when to end (RejoinGrace), so a refresh keeps the same session.
             # The returning user must use the same identity: room_io re-links by identity.
