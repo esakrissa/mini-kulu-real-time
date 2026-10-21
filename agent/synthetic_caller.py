@@ -5,10 +5,13 @@ track, and records client-perceived latency: from the end of the caller's speech
 first audible frame of the agent's reply. This is the number a user actually feels, so it
 includes network, STT endpointing, LLM, TTS and jitter buffers.
 
-Prompts are rendered with macOS `say` and cached under .cache/prompts/.
+Prompts are rendered with macOS `say` and cached under .cache/prompts/. The text scenario
+types its questions instead (LiveKit's `lk.chat` text stream, which the agent reads like
+speech), so it needs no `say`, and checks the agent's tools: web search and its own repository.
 
     uv run python synthetic_caller.py --turns 10
     uv run python synthetic_caller.py --scenario rejoin   # leave + rejoin mid-conversation
+    uv run python synthetic_caller.py --scenario text     # typed questions for the agent's tools
 """
 
 import argparse
@@ -56,6 +59,23 @@ PROMPTS = [
     "Say goodbye in Indonesian.",
 ]
 
+
+# Text scenario: typed questions that need the agent's tools, with words a right answer contains.
+# The first needs web search (EXA_API_KEY on the agent), the second its repository (GH_MCP_TOKEN).
+TEXT_PROMPTS = [
+    (
+        "What's the weather in Ubud right now?",
+        ("degree", "°", "celsius", "fahrenheit", "rain", "shower", "sunny", "clear", "cloud"),
+    ),
+    (
+        "How do you handle a browser refresh in the middle of a call? Check your own code.",
+        ("rejoin", "grace", "same room", "identity", "reconnect"),
+    ),
+]
+CHAT_TOPIC = "lk.chat"
+# A tool turn can be a filler line, a pause while the tool runs, then the answer. The turn is
+# over once the agent has been listening this long: above the agent's 4 s tool deadline.
+TOOL_QUIET_S = 5.0
 
 # Rejoin scenario: ask the agent to remember something, leave, rejoin, ask for it back.
 REJOIN_REMEMBER = "Please remember the number forty two."
@@ -271,6 +291,38 @@ class Caller:
                 self.state_changed.clear()
                 await self.state_changed.wait()
 
+    async def wait_until_quiet(self, step_timeout: float, quiet_s: float = TOOL_QUIET_S) -> None:
+        """Wait for the agent to speak, then to stay listening for `quiet_s`."""
+        await self.wait_for_state("speaking", step_timeout)
+        async with asyncio.timeout(step_timeout):
+            while True:
+                await self.wait_for_state("listening", step_timeout)
+                self.state_changed.clear()
+                try:
+                    await asyncio.wait_for(self.state_changed.wait(), quiet_s)
+                except TimeoutError:
+                    return
+
+    async def type_turn(self, n: int, prompt: str, step_timeout: float) -> TurnResult:
+        """Type `prompt` into the chat; latency runs from sending it to the first agent audio
+        (on a tool turn, that's the filler line)."""
+        await self.wait_for_state("listening", step_timeout)
+        self.agent_transcripts.clear()
+        self.first_audio_at = None
+        self.speech_end_at = time.perf_counter()
+        self.awaiting_reply = True
+        await self.room.local_participant.send_text(prompt, topic=CHAT_TOPIC)
+        try:
+            await self.wait_until_quiet(step_timeout)
+            await asyncio.sleep(0.3)  # let the last transcription stream close
+        except TimeoutError:
+            self.awaiting_reply = False
+            return TurnResult(n, prompt, prompt, " ".join(self.agent_transcripts), None, "timeout")
+        latency = None
+        if self.first_audio_at:
+            latency = round((self.first_audio_at - self.speech_end_at) * 1000, 1)
+        return TurnResult(n, prompt, prompt, " ".join(self.agent_transcripts), latency)
+
     async def turn(self, n: int, prompt: str, audio: np.ndarray, step_timeout: float) -> TurnResult:
         await self.wait_for_state("listening", step_timeout)
         self.user_transcripts.clear()
@@ -350,6 +402,32 @@ async def run(turns: int, voice: str, step_timeout: float, out: Path | None) -> 
     return results
 
 
+def answered(reply: str, expect: tuple[str, ...]) -> bool:
+    reply = reply.lower()
+    return any(word in reply for word in expect)
+
+
+async def run_text(step_timeout: float, prompts=TEXT_PROMPTS) -> bool:
+    """Type each question and check the reply contains one of its expected words."""
+    caller = Caller(f"caller-text-{int(time.time())}")
+    await caller.join()
+    ok = True
+    try:
+        # Let the greeting finish: its last audio still arrives after the agent is listening,
+        # and would count as the first reply to a question typed right away.
+        await caller.wait_until_quiet(step_timeout, quiet_s=1.0)
+        for n, (prompt, expect) in enumerate(prompts, start=1):
+            result = await caller.type_turn(n, prompt, step_timeout)
+            print_result(result)
+            if result.error or not answered(result.reply, expect):
+                print("      FAIL: no expected words in the reply")
+                ok = False
+    finally:
+        await caller.hang_up()
+    print("\ntext:", "PASS" if ok else "FAIL")
+    return ok
+
+
 async def run_rejoin(voice: str, step_timeout: float, away_s: float) -> bool:
     """Leave mid-conversation, rejoin as the same identity, and check the agent remembers."""
     caller = Caller(f"caller-rejoin-{int(time.time())}")
@@ -372,7 +450,7 @@ async def run_rejoin(voice: str, step_timeout: float, away_s: float) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--scenario", choices=["turns", "rejoin"], default="turns")
+    parser.add_argument("--scenario", choices=["turns", "rejoin", "text"], default="turns")
     parser.add_argument("--turns", type=int, default=5)
     parser.add_argument("--voice", default="Samantha", help="macOS `say` voice")
     parser.add_argument("--timeout", type=float, default=30.0, help="per-step timeout (s)")
@@ -386,6 +464,8 @@ def main() -> None:
     logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
     if args.scenario == "rejoin":
         ok = asyncio.run(run_rejoin(args.voice, args.timeout, args.away))
+    elif args.scenario == "text":
+        ok = asyncio.run(run_text(args.timeout))
     else:
         ok = all(
             r.error is None

@@ -206,12 +206,15 @@ connect and 12–16 s per call and found no documents in this repository, which 
 ## Test without a microphone
 
 `agent/synthetic_caller.py` joins over WebRTC like a browser, speaks prompts rendered with macOS
-`say`, and measures each turn from the end of its speech to the first audible reply.
+`say`, and measures each turn from the end of its speech to the first audible reply. The text
+scenario types its questions instead (the agent reads LiveKit's `lk.chat` text stream like speech)
+and checks the tools: one question that needs web search, one that needs the repository.
 
 ```bash
 cd agent
 uv run python synthetic_caller.py --turns 10 --out results.jsonl   # p50/p95 turn latency
 uv run python synthetic_caller.py --scenario rejoin --away 25       # leave, rejoin, check memory
+uv run python synthetic_caller.py --scenario text                   # typed: web search + repo tools
 uv run pytest -q && uv run ruff check .
 ```
 
