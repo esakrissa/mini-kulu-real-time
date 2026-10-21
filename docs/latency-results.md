@@ -1,5 +1,38 @@
 # Latency results
 
+## Longer calls run out of CPU on the e2-micro (22 Oct 2026)
+
+Four calls through the hosted page (Safari, real microphone), 01:09–01:19 WITA, release
+`agent-9c1ab4a324f4` with the web-search and repo tools. The caller heard the agent's audio
+break up in longer calls, and the agent once said web search wasn't available.
+
+What the VM showed (journal + Cloud Monitoring `instance/cpu/usage_time`):
+
+- **Every call is fine for about 2.5 minutes, then the CPU is capped.** The e2-micro sustains
+  0.25 vCPU and bursts above that while it has credit. The call used ~0.37 vCPU (21.9 CPU-s per
+  minute) until 17:12 UTC, then the hypervisor held the whole VM at ~0.21 vCPU (12–13 CPU-s per
+  minute) for the rest of the hour. From then on the worker's event loop stalled in steps of
+  exactly ~0.21 s with no CPU time used (the VM wasn't scheduled), 1,065 "VAD inference is
+  slower than realtime" warnings, VAD lag growing to 27 s and 45 s, `stt_final` up to 38 s, one
+  `e2e` of 42.8 s and "process is unresponsive". The agent's outgoing audio is produced in the
+  same starved process, which is the breaking up the caller heard.
+- **The turn detector ran on the VM.** In `start` mode outside LiveKit Cloud the SDK picks the
+  local `v1-mini` model; 6 of its predictions timed out ("eot prediction timed out") once the CPU
+  was capped. LiveKit's docs warn about exactly this on burstable instances.
+- **Session audio was recorded for LiveKit's agent insights**: both sides resampled and encoded
+  to Opus for the whole call. Measured on the laptop: ~7% of a core for the encoder alone.
+- **Memory**: 675 of 969 MB used and 282 MB in swap between calls. The forkserver preloads the
+  local turn-detector weights (~244 MB) for every job.
+- **Web search**: one search hit the 4 s deadline (4.25 s) while the CPU was capped, and the
+  tool's limit of 3 searches per call was reached in the first call. Both answers told the model
+  only that search didn't work, so it said search "isn't available".
+
+Changes (PR "Fit a call into the e2-micro"): the turn detector runs on LiveKit Inference
+(`AGENT_TURN_DETECTOR=v1`, a free monthly allowance; with no local fallback, a turn that can't
+reach it ends on the silence delay) and its local weights aren't preloaded; session audio isn't
+recorded (`AGENT_RECORD_AUDIO`; transcripts and traces still are); 6 searches per call, and the
+limit is said plainly. The page now shows every tool call with its result or error.
+
 ## Calls on the hosted page (20 Oct 2026)
 
 Nine short calls through https://mini-kulu.esakrissa.com (Safari with a real microphone, and

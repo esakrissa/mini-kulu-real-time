@@ -179,7 +179,7 @@ only when its credential is set:
 - **`web_search`** (`EXA_API_KEY`): [Exa](https://exa.ai)'s hosted MCP server
   (`https://mcp.exa.ai/mcp`, key in the `x-api-key` header), its `web_search_exa` tool with three
   results and the text capped at 3,000 characters, so the LLM's next first token stays fast. At most
-  three searches per call (Exa bills per search).
+  six searches per call (`AGENT_MAX_SEARCHES`; Exa bills ~$0.007 per search).
 - **`read_project_file`** (`GH_MCP_TOKEN`): the agent explains how it's built from its own code,
   read through GitHub's remote MCP server (`https://api.githubcopilot.com/mcp/x/repos/readonly`,
   `get_file_contents`). The repository is pinned in our code, because the tool itself takes any
@@ -193,7 +193,9 @@ server never delays the greeting) and the model sees one small tool per server. 
 returns one sentence ("the search didn't come back in time") and the answer comes without it. A
 short "one moment, let me check" plays only if the tool is still running after 0.5 s of silence,
 and stays out of the chat history (in it, the model took the line as its own and waited for the
-user). Each call is timed as the `tool_call` stage, labelled with the tool's name.
+user). Each call is timed as the `tool_call` stage, labelled with the tool's name, and shown on
+the page as it happens: a card per call (searching, then done or failed) that expands to the
+request and the result or the error.
 
 Measured from Bali: Exa ~0.6–1.6 s per search once connected (connect ~0.5 s), GitHub ~1.7–2.3 s
 per file (connect ~1.6 s). Gemma 4 and GPT-4.1 mini both call the tools. On GCP: set the
