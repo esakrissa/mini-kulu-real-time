@@ -171,6 +171,38 @@ ElevenLabs outage costs one sentence, not the call. It's off by default, and wit
 agent logs a warning and stays on LiveKit Inference. On GCP: set the repository variable
 `TTS_PROVIDER=elevenlabs` and the secret `ELEVEN_API_KEY`, then re-run the Infra workflow.
 
+## Tools (optional): web search and "ask about this project"
+
+Two tools come from remote MCP servers ([agent/agent_tools.py](agent/agent_tools.py)), each on
+only when its credential is set:
+
+- **`web_search`** (`EXA_API_KEY`): [Exa](https://exa.ai)'s hosted MCP server
+  (`https://mcp.exa.ai/mcp`, key in the `x-api-key` header), its `web_search_exa` tool with three
+  results and the text capped at 3,000 characters, so the LLM's next first token stays fast. At most
+  three searches per call (Exa bills per search).
+- **`read_project_file`** (`GH_MCP_TOKEN`): the agent explains how it's built from its own code,
+  read through GitHub's remote MCP server (`https://api.githubcopilot.com/mcp/x/repos/readonly`,
+  `get_file_contents`). The repository is pinned in our code, because the tool itself takes any
+  owner and repo; the token is fine-grained with public read-only access and nothing else. The tool
+  description lists the files worth opening, so the model doesn't guess paths.
+
+The SDK's `MCPToolset` would connect before the session starts and expose each server's whole
+tool surface, so instead each server connects in the background when the call starts (a slow
+server never delays the greeting) and the model sees one small tool per server. Every call has a
+4 s deadline (`AGENT_TOOL_TIMEOUT_S`, connecting included); past it, or on an error, the tool
+returns one sentence ("the search didn't come back in time") and the answer comes without it. A
+short "one moment, let me check" plays only if the tool is still running after 0.5 s of silence,
+and stays out of the chat history (in it, the model took the line as its own and waited for the
+user). Each call is timed as the `tool_call` stage, labelled with the tool's name.
+
+Measured from Bali: Exa ~0.6–1.6 s per search once connected (connect ~0.5 s), GitHub ~1.7–2.3 s
+per file (connect ~1.6 s). Gemma 4 and GPT-4.1 mini both call the tools. On GCP: set the
+repository variables `WEB_SEARCH=true` / `REPO_TOOLS=true` and the secrets `EXA_API_KEY` /
+`GH_MCP_TOKEN`, then re-run the Infra workflow.
+
+GitMCP's per-repo endpoint was the first plan (free, no token). Measured 21 Oct it took ~11 s to
+connect and 12–16 s per call and found no documents in this repository, which rules it out for voice.
+
 ## Test without a microphone
 
 `agent/synthetic_caller.py` joins over WebRTC like a browser, speaks prompts rendered with macOS
@@ -190,7 +222,7 @@ minutes.
 ## Latency metrics
 
 The agent records each turn's latency per stage (`stt_final`, `end_of_turn`, `llm_ttft`, `tts_ttfb`,
-`e2e`) in an OpenTelemetry histogram and pushes it over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is
+`e2e`, plus `tool_call` when the agent uses a tool) in an OpenTelemetry histogram and pushes it over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is
 set (Grafana Cloud here); otherwise it logs one line per message. Metric definition, labels and
 p50/p95 queries: [observability/README.md](observability/README.md).
 
@@ -218,27 +250,7 @@ p50/p95 queries: [observability/README.md](observability/README.md).
   passcode gate on `/api/token` (passcode in Secret Manager, signed HttpOnly session cookie), per-IP
   rate limits and a daily call cap, and an optional custom domain. Setup:
   [infra/README.md](infra/README.md#hosted-web-client-cloud-run).
-
-Next:
-
-- [ ] **Agent tools: live web search through Exa's MCP server.** Give the agent a
-  `web_search_exa` tool from Exa's hosted MCP server (`https://mcp.exa.ai/mcp`, API key in
-  the `x-api-key` header from Secret Manager), attached with LiveKit's
-  `mcp.MCPToolset(mcp_server=mcp.MCPServerHTTP(..., allowed_tools=["web_search_exa"]))` so the
-  model sees one tool, not Exa's whole surface. Exa 3.0 (19 Oct 2026) serves it: a larger
-  embedding model, Dynamic Highlights (about 95% fewer tokens than full pages, which keeps the
-  LLM's first token fast), and a $4 per 1,000 requests Lite tier next to Auto at $7. For voice:
-  the agent says a short filler ("let me look that up") while the tool runs, the tool call gets
-  its own stage in the latency histogram (`tool_call`), and a search that takes longer than ~3 s
-  is dropped, so the answer comes without it rather than late.
-- [ ] **"Ask about this project": an MCP server that can only see this repository.** Let the
-  agent explain mini-kulu itself (architecture, why an e2-micro, how the failover works) from
-  the code, not from memory. Plan: [GitMCP](https://github.com/idosal/git-mcp)'s per-repo
-  endpoint, `https://gitmcp.io/esakrissa/mini-kulu-real-time`. The repository is fixed by the
-  URL, so the tools (fetch docs, search docs, search code) can't reach any other repo. It's
-  free, needs no token, and reads a `llms.txt` first, so the repo gets a short `llms.txt` that
-  points at the README, `docs/architecture.md` and the key modules. Alternatives considered:
-  the official GitHub MCP server with a fine-grained token limited to this one repository,
-  read-only, `repos` toolset only (tightest access control, but raw file reads cost more tokens
-  and time per turn); DeepWiki's MCP `ask_question` (good answers, but slow for voice, and its
-  tools take any repository name, so it needs a wrapper that pins the name).
+- [x] **Agent tools from MCP servers**: live web search through Exa's hosted MCP server, and
+  "ask about this project" through GitHub's remote MCP server, pinned to this repository (GitMCP,
+  the first plan, was too slow for voice). See
+  [Tools](#tools-optional-web-search-and-ask-about-this-project).
