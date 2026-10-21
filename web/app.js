@@ -9,6 +9,10 @@
 // with its audio (LiveKit's synchronized transcription), so they're rendered as they stream.
 // The user's words arrive as interim streams (full text so far) and one final per segment;
 // consecutive user segments share one bubble until the agent replies.
+//
+// Tool calls (web search, reading the repo) arrive as JSON on their own text-stream topic:
+// "running" when the agent starts one, then "ok" with the result or "error" with the reason.
+// Each call is one collapsible card in the transcript, updated in place.
 
 import {
   ConnectionState,
@@ -24,6 +28,7 @@ const SESSION_KEY = 'mini-kulu-session';
 const REJOIN_WINDOW_MS = 25_000; // a bit under the agent's 30 s grace
 const HANGUP_RPC = 'mini_kulu.hang_up'; // agent/rejoin.py
 const MIC_TIMEOUT_MS = 8_000;
+const TOOL_TOPIC = 'mini_kulu.tool'; // agent/agent.py TOOL_EVENTS_TOPIC
 
 const $ = (id) => document.getElementById(id);
 let room = null;
@@ -194,6 +199,68 @@ async function streamAgentText(reader, segmentId) {
     li.classList.remove('speaking');
     p.textContent = p.textContent.trim();
   }
+}
+
+// -- tool calls ----------------------------------------------------------------------------
+
+const TOOL_TEXT = {
+  web_search: { running: 'Searching the web', ok: 'Searched the web', error: 'Web search failed' },
+  read_project_file: { running: 'Reading a file', ok: 'Read a file', error: "Couldn't read a file" },
+};
+const ICONS = {
+  web_search: '<circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/>',
+  read_project_file: '<path d="M4 1.5h5l3 3v10H4z"/><path d="M9 1.5v3h3"/>',
+};
+const toolCards = new Map(); // call id -> card
+
+function toolCard(ev) {
+  let li = toolCards.get(ev.id);
+  if (li) return li;
+  userBubble = null; // later user speech starts a new bubble below the card
+  li = document.createElement('li');
+  li.className = 'tool';
+  li.innerHTML = `
+    <details>
+      <summary>
+        <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">${ICONS[ev.tool] ?? ICONS.web_search}</svg>
+        <span class="label"></span><span class="detail mono"></span>
+        <span class="took mono"></span>
+        <span class="spin" aria-hidden="true"></span>
+        <svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m4.5 2.5 3.5 3.5-3.5 3.5"/></svg>
+      </summary>
+      <div class="body">
+        <h4 class="mono">request</h4><pre class="req"></pre>
+        <h4 class="mono out-h">result</h4><pre class="out"></pre>
+      </div>
+    </details>
+    <p class="err mono" hidden></p>`;
+  const args = ev.args ?? {};
+  li.querySelector('.detail').textContent = args.query ? `“${args.query}”` : (args.path ?? '');
+  li.querySelector('.req').textContent =
+    `${ev.server || 'MCP'} · ${ev.mcp_tool}\n${JSON.stringify(args, null, 2)}`;
+  toolCards.set(ev.id, li);
+  append(li);
+  return li;
+}
+
+function showToolEvent(ev) {
+  const li = toolCard(ev);
+  // Events are separate streams; never let a late "running" undo a finished call.
+  if (ev.status === 'running' && li.dataset.status) return;
+  li.dataset.status = ev.status;
+  li.querySelector('.label').textContent = TOOL_TEXT[ev.tool]?.[ev.status] ?? ev.tool;
+  const took = [ev.server, ev.seconds != null ? `${ev.seconds.toFixed(2)} s` : ''].filter(Boolean);
+  li.querySelector('.took').textContent = took.join(' · ');
+  if (ev.status === 'ok') {
+    li.querySelector('.out').textContent = ev.result || '(empty)';
+  } else if (ev.status === 'error') {
+    li.querySelector('.out-h').textContent = 'error';
+    li.querySelector('.out').textContent = ev.error;
+    const err = li.querySelector('.err');
+    err.textContent = ev.error;
+    err.hidden = false;
+  }
+  keepScrolled();
 }
 
 // -- live caption under the waveform -------------------------------------------------------
@@ -393,6 +460,14 @@ function wireRoom(r) {
       return;
     }
     if (text) showUserText(segmentId, text, attrs['lk.transcription_final'] === 'true');
+  });
+
+  r.registerTextStreamHandler(TOOL_TOPIC, async (reader) => {
+    try {
+      showToolEvent(JSON.parse(await reader.readAll()));
+    } catch (err) {
+      console.warn('bad tool event', err);
+    }
   });
 }
 
