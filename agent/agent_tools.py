@@ -12,6 +12,10 @@ handed to the agent as MCPToolsets, for three reasons:
 - Every call has a deadline and a size cap, and a failure turns into one sentence the model can
   answer from ("the search took too long"), never an exception or a long silence.
 
+Every call is also reported to the page as it happens (ToolTrace): what was asked, how long it
+took, and what came back or what went wrong, so a caller can see why an answer sounds the way
+it does.
+
 A tool is only built when its credential is set (EXA_API_KEY, GH_MCP_TOKEN), so the agent
 runs as before without them.
 """
@@ -20,7 +24,9 @@ import asyncio
 import contextlib
 import logging
 import time
+import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from livekit.agents import RunContext, function_tool, llm
@@ -61,7 +67,12 @@ PROJECT_FILES = {
     ".github/workflows/infra.yml": "tofu plan on pull requests, apply on main",
 }
 
+# What the page gets of a result: enough to see what the model read.
+MAX_EVENT_CHARS = 4_000
+
 LatencySink = Callable[[str, float], None]
+# Receives one dict per tool event (see ToolTrace); the agent sends them to the page.
+EventSink = Callable[[dict[str, Any]], None]
 
 
 def filler(context: RunContext) -> Callable[[int], Any]:
@@ -86,10 +97,13 @@ def clip(text: str, limit: int) -> str:
 class RemoteTool:
     """One tool of a remote MCP server, connected in the background and called with a deadline."""
 
-    def __init__(self, server: mcp.MCPServer, tool_name: str, timeout_s: float) -> None:
+    def __init__(
+        self, server: mcp.MCPServer, tool_name: str, timeout_s: float, label: str = ""
+    ) -> None:
         self.server = server
         self.tool_name = tool_name
         self.timeout_s = timeout_s
+        self.label = label  # the server's name on the page
         self._connecting: asyncio.Task[Any] | None = None
 
     def connect(self) -> None:
@@ -130,21 +144,67 @@ class RemoteTool:
             await self.server.aclose()
 
 
+@dataclass
+class Outcome:
+    text: str | None
+    error: str | None = None
+
+
 async def timed(
     tool: RemoteTool, arguments: dict[str, Any], on_latency: LatencySink | None
-) -> str | None:
-    """Call the tool and report its latency; None if it failed or ran out of time."""
+) -> Outcome:
+    """Call the tool and report its latency. The text, or why there is none."""
     start = time.perf_counter()
     try:
-        return await tool.call(arguments)
+        text = await tool.call(arguments)
+        return Outcome(text) if text else Outcome(None, "the server returned nothing")
     except TimeoutError:
         logger.warning("%s timed out after %.1f s", tool.tool_name, tool.timeout_s)
+        return Outcome(None, f"no answer within {tool.timeout_s:g} s")
     except Exception as e:
         logger.warning("%s failed: %s", tool.tool_name, e)
+        return Outcome(None, f"{type(e).__name__}: {e}".rstrip(": "))
     finally:
         if on_latency is not None:
             on_latency(tool.tool_name, time.perf_counter() - start)
-    return None
+
+
+class ToolTrace:
+    """One tool call as the page sees it: a "running" event now, then "ok" or "error".
+
+    Events share an id, so the page updates one card. A broken sink never breaks the call.
+    """
+
+    def __init__(
+        self, sink: EventSink | None, name: str, remote: RemoteTool, args: dict[str, Any]
+    ) -> None:
+        self._sink = sink
+        self._start = time.perf_counter()
+        self._base = {
+            "id": uuid.uuid4().hex[:12],
+            "tool": name,
+            "server": remote.label,
+            "mcp_tool": remote.tool_name,
+            "args": args,
+        }
+        self._emit("running")
+
+    def ok(self, result: str) -> None:
+        self._emit("ok", result=clip(result, MAX_EVENT_CHARS))
+
+    def fail(self, error: str) -> None:
+        self._emit("error", error=error)
+
+    def _emit(self, status: str, **fields: Any) -> None:
+        if self._sink is None:
+            return
+        event = {**self._base, "status": status, **fields}
+        if status != "running":
+            event["seconds"] = round(time.perf_counter() - self._start, 3)
+        try:
+            self._sink(event)
+        except Exception:
+            logger.exception("failed to report a tool event")
 
 
 def exa_search(api_key: str, timeout_s: float) -> RemoteTool:
@@ -156,7 +216,7 @@ def exa_search(api_key: str, timeout_s: float) -> RemoteTool:
         client_session_timeout_seconds=timeout_s,
         tool_result_resolver=text_of,
     )
-    return RemoteTool(server, EXA_TOOL, timeout_s)
+    return RemoteTool(server, EXA_TOOL, timeout_s, label="Exa MCP")
 
 
 def github_files(token: str, timeout_s: float) -> RemoteTool:
@@ -169,11 +229,14 @@ def github_files(token: str, timeout_s: float) -> RemoteTool:
         client_session_timeout_seconds=timeout_s,
         tool_result_resolver=text_of,
     )
-    return RemoteTool(server, GITHUB_TOOL, timeout_s)
+    return RemoteTool(server, GITHUB_TOOL, timeout_s, label="GitHub MCP")
 
 
 def web_search_tool(
-    search: RemoteTool, max_calls: int, on_latency: LatencySink | None = None
+    search: RemoteTool,
+    max_calls: int,
+    on_latency: LatencySink | None = None,
+    on_event: EventSink | None = None,
 ) -> llm.FunctionTool:
     """A `web_search` tool for one call, with at most `max_calls` searches (they're billed)."""
     calls = 0
@@ -187,21 +250,31 @@ def web_search_tool(
             query: What to find, as a full sentence.
         """
         nonlocal calls
+        trace = ToolTrace(on_event, "web_search", search, {"query": query})
         if calls >= max_calls:
-            return "No more searches in this call. Answer from what you know."
+            logger.info("web_search limit reached (%d per call)", max_calls)
+            trace.fail(f"limit reached: {max_calls} searches per call")
+            # Said plainly, or the model tells the user that search "isn't available".
+            return (
+                f"You've used all {max_calls} web searches allowed in one call. Tell the user "
+                "that, then answer from what you know."
+            )
         calls += 1
         async with context.with_filler(filler(context), delay=FILLER_DELAY_S):
-            text = await timed(
+            outcome = await timed(
                 search,
                 {"query": query, "objective": query, "numResults": SEARCH_RESULTS},
                 on_latency,
             )
-        if not text:
+        if not outcome.text:
+            trace.fail(outcome.error or "no result")
             return (
                 "The search didn't come back in time. Say you couldn't check just now, "
                 "then answer from what you know if you can."
             )
-        return clip(text, MAX_SEARCH_CHARS)
+        text = clip(outcome.text, MAX_SEARCH_CHARS)
+        trace.ok(text)
+        return text
 
     return web_search
 
@@ -212,20 +285,28 @@ def valid_path(path: str) -> bool:
 
 
 def project_file_tool(
-    files: RemoteTool, repo: str = PROJECT_REPO, on_latency: LatencySink | None = None
+    files: RemoteTool,
+    repo: str = PROJECT_REPO,
+    on_latency: LatencySink | None = None,
+    on_event: EventSink | None = None,
 ) -> llm.FunctionTool:
     """A `read_project_file` tool that can only read `repo` (owner/name)."""
     owner, name = repo.split("/", 1)
     file_list = "; ".join(f"{p}: {what}" for p, what in PROJECT_FILES.items())
 
     async def read_project_file(context: RunContext, path: str) -> str:
+        trace = ToolTrace(on_event, "read_project_file", files, {"repo": repo, "path": path})
         if not valid_path(path):
+            trace.fail("not a path in this repository")
             return f"Not a file path in this repository: {path!r}."
         async with context.with_filler(filler(context), delay=FILLER_DELAY_S):
-            text = await timed(files, {"owner": owner, "repo": name, "path": path}, on_latency)
-        if not text:
+            outcome = await timed(files, {"owner": owner, "repo": name, "path": path}, on_latency)
+        if not outcome.text:
+            trace.fail(outcome.error or "no result")
             return f"Couldn't read {path} just now. Answer from what you know, and say so."
-        return clip(text, MAX_FILE_CHARS)
+        text = clip(outcome.text, MAX_FILE_CHARS)
+        trace.ok(text)
+        return text
 
     return function_tool(
         read_project_file,

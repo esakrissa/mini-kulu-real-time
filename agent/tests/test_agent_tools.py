@@ -63,26 +63,27 @@ async def test_call_returns_the_tool_text():
 async def test_slow_server_times_out_and_reports_latency():
     seen = []
     tool = remote(FakeServer(call_s=1.0), timeout_s=0.05)
-    assert await at.timed(tool, {}, lambda name, s: seen.append((name, s))) is None
+    outcome = await at.timed(tool, {}, lambda name, s: seen.append((name, s)))
+    assert outcome.text is None and outcome.error == "no answer within 0.05 s"
     assert seen and seen[0][0] == "search" and 0.04 < seen[0][1] < 0.5
 
 
 async def test_deadline_includes_connecting_but_keeps_the_connection_going():
     server = FakeServer(connect_s=0.1)
     tool = remote(server, timeout_s=0.02)
-    assert await at.timed(tool, {}, None) is None
+    assert (await at.timed(tool, {}, None)).text is None
     # The timed-out call didn't cancel the connect, so the next call finds it ready.
     await asyncio.sleep(0.15)
     assert server.initialized
-    assert await at.timed(tool, {}, None) is not None
+    assert (await at.timed(tool, {}, None)).text is not None
     assert server.connects == 1
 
 
 async def test_failed_connect_is_retried_on_the_next_call():
     server = FakeServer(fail_connects=1)
     tool = remote(server)
-    assert await at.timed(tool, {}, None) is None
-    assert await at.timed(tool, {}, None) == "result for {}"
+    assert (await at.timed(tool, {}, None)).error == "ConnectionError: refused"
+    assert (await at.timed(tool, {}, None)).text == "result for {}"
     assert server.connects == 2
 
 
@@ -97,7 +98,8 @@ async def test_dropped_connection_reconnects():
 
 async def test_missing_tool_fails_softly():
     tool = remote(FakeServer(tool_name="other"))
-    assert await at.timed(tool, {}, None) is None
+    outcome = await at.timed(tool, {}, None)
+    assert outcome.text is None and outcome.error.startswith("LookupError")
 
 
 async def test_web_search_fixes_its_arguments_and_caps_calls():
@@ -112,7 +114,7 @@ async def test_web_search_fixes_its_arguments_and_caps_calls():
         "objective": "weather in Ubud",
         "numResults": at.SEARCH_RESULTS,
     }
-    assert "No more searches" in last
+    assert "used all 2 web searches" in last
     assert ctx.fillers == 2
 
 
@@ -135,6 +137,37 @@ async def test_project_file_rejects_paths_outside_the_repository():
     for path in ["/etc/passwd", "../other-repo/README.md", "docs/../../x", ""]:
         assert "Not a file path" in await read(FakeContext(), path)
     assert server.calls == []
+
+
+async def test_web_search_reports_each_call_to_the_page():
+    events = []
+    search = at.web_search_tool(remote(FakeServer()), max_calls=1, on_event=events.append)
+    await search(FakeContext(), "weather in Ubud")
+    await search(FakeContext(), "and tomorrow?")
+    running, ok, limit_running, limit = events
+    assert running["status"] == "running" and running["args"] == {"query": "weather in Ubud"}
+    assert ok["id"] == running["id"] and ok["status"] == "ok"
+    assert ok["result"].startswith("result for") and ok["seconds"] >= 0
+    assert limit["id"] == limit_running["id"] != ok["id"]
+    assert limit["status"] == "error" and "1 searches per call" in limit["error"]
+
+
+async def test_failed_call_reports_the_error_to_the_page():
+    events = []
+    tool = remote(FakeServer(tool_name=at.GITHUB_TOOL, call_s=1.0), 0.02, at.GITHUB_TOOL)
+    read = at.project_file_tool(tool, on_event=events.append)
+    await read(FakeContext(), "README.md")
+    assert [e["status"] for e in events] == ["running", "error"]
+    assert events[1]["error"] == "no answer within 0.02 s"
+    assert events[1]["mcp_tool"] == at.GITHUB_TOOL
+
+
+async def test_a_broken_event_sink_never_breaks_the_call():
+    def sink(_event):
+        raise RuntimeError("room gone")
+
+    search = at.web_search_tool(remote(FakeServer()), max_calls=1, on_event=sink)
+    assert (await search(FakeContext(), "news")).startswith("result for")
 
 
 def test_clip():

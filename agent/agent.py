@@ -12,6 +12,8 @@ recorded. With both on the VM, a call used ~0.4 vCPU, ran out of burst after ~2.
 the audio started breaking up (docs/latency-results.md).
 """
 
+import asyncio
+import json
 import logging
 import os
 
@@ -101,8 +103,10 @@ NOISE_CANCELLATION = os.getenv("AGENT_NOISE_CANCELLATION", "1").strip().lower() 
 EXA_API_KEY = os.getenv("EXA_API_KEY", "")
 GH_MCP_TOKEN = os.getenv("GH_MCP_TOKEN", "")
 TOOL_TIMEOUT_S = float(os.getenv("AGENT_TOOL_TIMEOUT_S", "4"))
-# Searches are billed per request (Exa), so each call gets a few.
-MAX_SEARCHES = int(os.getenv("AGENT_MAX_SEARCHES", "3"))
+# Searches are billed per request (Exa, ~$0.007 each), so each call gets a limited number.
+MAX_SEARCHES = int(os.getenv("AGENT_MAX_SEARCHES", "6"))
+# Every tool call is reported to the page on this text-stream topic (web/app.js shows it).
+TOOL_EVENTS_TOPIC = "mini_kulu.tool"
 
 # Session audio for LiveKit Cloud's agent insights: encoding both sides to Opus costs CPU for
 # the whole call. Transcripts and traces are still uploaded.
@@ -166,16 +170,43 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     session.on("conversation_item_added", turn_metrics.on_conversation_item_added)
     ctx.add_shutdown_callback(turn_metrics.flush)
 
+    # Tool calls as they happen, for the page: what was asked, the result or the error.
+    sending: set[asyncio.Task[object]] = set()
+
+    def send_tool_event(event: dict[str, object]) -> None:
+        if not ctx.room.isconnected():
+            return
+        task = asyncio.create_task(
+            ctx.room.local_participant.send_text(
+                json.dumps(event), topic=TOOL_EVENTS_TOPIC, compress=False
+            )
+        )
+        sending.add(task)
+        task.add_done_callback(sent)
+
+    def sent(task: asyncio.Task[object]) -> None:
+        sending.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning("tool event not sent: %s", task.exception())
+
     # Remote tools connect in the background, so a slow MCP server never delays the greeting.
     tools: list[llm.Tool] = []
     remotes = []
     if EXA_API_KEY:
         search = exa_search(EXA_API_KEY, TOOL_TIMEOUT_S)
-        tools.append(web_search_tool(search, MAX_SEARCHES, turn_metrics.record_tool_call))
+        tools.append(
+            web_search_tool(
+                search, MAX_SEARCHES, turn_metrics.record_tool_call, on_event=send_tool_event
+            )
+        )
         remotes.append(search)
     if GH_MCP_TOKEN:
         files = github_files(GH_MCP_TOKEN, TOOL_TIMEOUT_S)
-        tools.append(project_file_tool(files, on_latency=turn_metrics.record_tool_call))
+        tools.append(
+            project_file_tool(
+                files, on_latency=turn_metrics.record_tool_call, on_event=send_tool_event
+            )
+        )
         remotes.append(files)
     for remote in remotes:
         remote.connect()
